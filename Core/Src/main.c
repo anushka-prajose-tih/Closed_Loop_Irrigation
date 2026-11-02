@@ -120,12 +120,13 @@ float PAR_data = 0.0;
 
 /* Application flags */
 uint8_t GSM_connected_flag = 0;
-uint8_t flash_rea  dy_flag = 0;
+uint8_t flash_ready_flag = 0;
 uint8_t Rotary_button_pressed = 0;
 uint8_t wakeup_from_alarm = 0;
 uint8_t bootup_flag = 0;
 uint8_t RTC_alarm_flag = 0;
 
+#if (USE_HTTP_UPLOAD == 0)
 /* MQTT link (always connected) and the simulated motor - see MQTT_app_poll() */
 char mqtt_device_id[24] = {0};  // "SAMBHAV_<uid>", same as the JSON Device_ID
 uint8_t mqtt_connected = 0;
@@ -133,6 +134,7 @@ uint8_t motor_running = 0;
 uint32_t motor_start_tick = 0;
 uint32_t motor_duration_ms = 0;
 uint32_t mqtt_last_check_tick = 0;
+#endif
 
 extern uint32_t flash_write_address;
 extern uint32_t flash_read_address;
@@ -154,8 +156,10 @@ static void MX_SPI2_Init(void);
 static void MX_I2C3_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
+#if (USE_HTTP_UPLOAD == 0)
 uint8_t MQTT_app_connect(void);
 void MQTT_app_poll(void);
+#endif
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -232,8 +236,10 @@ int main(void)
       RTC_alarm_flag = RESET;
     }
 
+#if (USE_HTTP_UPLOAD == 0)
     /* Between cycles: handle motor_cmd/cmd/ota, stop the motor on time */
     MQTT_app_poll();
+#endif
 
     if (Rotary_button_pressed == 1)
     {
@@ -897,7 +903,9 @@ void App_operation()
     if (!GSM_isAlive())
       GSM_power_up();
     GSM_connected_flag = GSM_time_sync(TIME_SYNC_URL);
+#if (USE_HTTP_UPLOAD == 0)
     MQTT_app_connect();
+#endif
   }
 
   ts = RTC_read_device_time();
@@ -1541,22 +1549,31 @@ void GSM_post_sequence(time_t ts)
     else
     {
       // GSM_power_up();  /* Modem stays on for the MQTT link */
+#if (USE_HTTP_UPLOAD == 0)
       if (!GSM_MQTT_isConnected())
         MQTT_app_connect();
+#endif
       if (time_tm.tm_hour == 0)
         GSM_connected_flag = GSM_time_sync(TIME_SYNC_URL);
     }
     printDisplay("Data Post");
     serial_print("Posting data to server");
     // read data from flash
+#if (USE_HTTP_UPLOAD == 1)
+    while (flash_ready_flag == 1 && flash_read_address < flash_write_address)
+#else
     while (flash_ready_flag == 1 && mqtt_connected == 1 && flash_read_address < flash_write_address)
+#endif
     {
 
       memset(server_json_backup, 0, sizeof(server_json_backup));
       read_flash_create_json(flash_read_address, server_json_backup);
       HAL_Delay(100);
-      // GSM_Publish = GSM_HTTP_sendDataToServer(server_json_backup);
+#if (USE_HTTP_UPLOAD == 1)
+      GSM_Publish = GSM_HTTP_sendDataToServer(server_json_backup);
+#else
       GSM_Publish = GSM_MQTT_publish(MQTT_TOPIC_DATA, server_json_backup, 1, 0);
+#endif
       if (GSM_Publish == 1)
       {
         memset(server_json_backup, 0, sizeof(server_json_backup));
@@ -1603,6 +1620,7 @@ void GSM_post_sequence(time_t ts)
   }
 }
 
+#if (USE_HTTP_UPLOAD == 0)
 /* ---------------------------------------------------------------------------
  * MQTT device behaviour, mirroring device_simulator.py:
  *   publishes readings on "data" (from GSM_post_sequence), subscribes to
@@ -1783,6 +1801,7 @@ void MQTT_app_poll(void)
   /* Clear the buffer so only URCs arriving from now on count as events */
   GSM_resetRxBuff();
 }
+#endif /* USE_HTTP_UPLOAD == 0 */
 
 /* USER CODE END 4 */
 

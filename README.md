@@ -62,7 +62,7 @@ The system is intended for agriculture and environmental monitoring use cases su
   - subscribes to `motor_cmd`, `cmd` and `ota`; messages addressed to a different `Device_ID` are ignored
 - The MQTT topics and payloads are defined by the external Python backend (`device_simulator.py` / `onem2m_bridge.py`, which bridges to a oneM2M Mobius CSE).
 - There is no motor hardware yet. "Motor" is a software timer started by `motor_cmd` and run for `tti` × `MQTT_TTI_UNIT_SECONDS`; no GPIO is switched. OTA messages are only logged.
-- The earlier HTTP upload path is kept in the source, commented out.
+- The upload transport is a build option: `USE_HTTP_UPLOAD` at the top of `Core/Inc/GSM_EC200U.h`. `0` publishes over MQTT; `1` POSTs each record to `SERVER_URL`, and MQTT command handling and the motor timer are then left out of the build. It can also be set per build configuration with `-DUSE_HTTP_UPLOAD=0` or `=1`; any other value stops the build with an error.
 
 ### 2. Display
 - Display: SSD1306 OLED

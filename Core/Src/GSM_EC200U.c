@@ -301,10 +301,11 @@ uint8_t GSM_time_sync(char *url)
 	return ret;
 }
 
-/* ==================================================================
-   HTTP POST upload to SERVER_URL - replaced by MQTT (GSM_MQTT_publish()
-   on MQTT_TOPIC_DATA). Kept for reference / rollback.
-   ==================================================================
+#if (USE_HTTP_UPLOAD == 1)
+static char *_waitForLine(const char *token, uint32_t timeout);
+
+/* HTTP POST upload to SERVER_URL - the alternative to the MQTT "data"
+   publish, selected by USE_HTTP_UPLOAD in GSM_EC200U.h */
 uint8_t GSM_HTTP_sendDataToServer(char *data)
 {
 	if (data == NULL)
@@ -395,13 +396,23 @@ uint8_t GSM_HTTP_sendDataToServer(char *data)
 
 	GSM_txData(data, strlen(data));
 	GSM_resetRxBuff();
-	_waitForResp(15000, 25);
-	while (responseTimeOut())
-		;
+	/* Result: "+QHTTPPOST: <err>[,<status>[,<content_length>]]". Read the
+	   numbers rather than fixed offsets: the trailing content length is only
+	   present when the server sends Content-Length. Success = err 0, any 2xx. */
+	char *result = _waitForLine("+QHTTPPOST:", 15000);
 	snprintf(print_char, sizeof(print_char), "Received = %s", aRxBuffer);
 	serial_print(print_char);
-	tempResp = "200";
-	if (memcmp(aRxBuffer + (RX_buff_index - 5), tempResp, strlen(tempResp)) != 0)
+	long postErr = -1, httpStatus = 0;
+	if (result != NULL)
+	{
+		char *next;
+		postErr = strtol(result + strlen("+QHTTPPOST:"), &next, 10);
+		if (*next == ',')
+			httpStatus = strtol(next + 1, NULL, 10);
+	}
+	snprintf(print_char, sizeof(print_char), "HTTP POST err %ld, status %ld", postErr, httpStatus);
+	serial_print(print_char);
+	if (postErr != 0 || httpStatus < 200 || httpStatus > 299)
 	{
 		ret = RESET;
 	}
@@ -419,7 +430,7 @@ uint8_t GSM_HTTP_sendDataToServer(char *data)
 	serial_print(print_char);
 	return ret;
 }
-   ================================================================== */
+#endif /* USE_HTTP_UPLOAD == 1 */
 
 uint8_t GSM_httpGet(char *url, char *resp)
 {

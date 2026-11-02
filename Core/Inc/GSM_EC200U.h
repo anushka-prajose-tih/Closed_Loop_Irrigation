@@ -5,12 +5,32 @@
 extern "C" {
 #endif
 
+/* Upload transport for the flash records:
+     0 - publish on the MQTT "data" topic, and keep the MQTT link up for
+         motor_cmd/cmd/ota handling
+     1 - HTTP POST each record to SERVER_URL; the MQTT link, command
+         handling and motor timer are compiled out
+   Always defined and tested with #if (USE_HTTP_UPLOAD == x), per MISRA C
+   Rules 20.8/20.9. A build configuration can override it with
+   -DUSE_HTTP_UPLOAD=0 or =1. */
+#ifndef USE_HTTP_UPLOAD
+#define USE_HTTP_UPLOAD 0
+#endif
+#if (USE_HTTP_UPLOAD != 0) && (USE_HTTP_UPLOAD != 1)
+#error "USE_HTTP_UPLOAD must be 0 (MQTT) or 1 (HTTP)"
+#endif
+
 #include "main.h"
 
 #define SIM_APN         "airtelgprs.com"
 #define TIME_SYNC_URL   "http://www.tih.iitb.ac.in/"
-// #define SERVER_URL      "https://eagris.tihiitb.org/eagris/v1/sensor-data/public/receive/data"
-#define MQTT_HOST       "test.mosquitto.org"//"mqtt.tihiitb.org"
+#if (USE_HTTP_UPLOAD == 1)
+//Current URL is test URL for agriOS project.
+#define SERVER_URL      "http://15.206.109.220/dev/v1/ingest"     //Active URL : "https://eagris.tihiitb.org/eagris/v1/sensor-data/public/receive/data"
+#endif
+/* Broker as in mqtt_device.h (EC200 MQTT device): public, port 1883, no login
+   (GSM_MQTT_connect() sends no username/password) */
+#define MQTT_HOST       "broker.hivemq.com"    // was "test.mosquitto.org", earlier "mqtt.tihiitb.org"
 #define MQTT_SSL_HOST   "mqtt.tihiitb.org"
 #define MQTT_PORT       "1883"
 #define MQTT_DEVICE_ID  "TIH_NODE_01"
@@ -41,7 +61,9 @@ void GSM_resetRxBuff(void);
 void GSM_power_up(void);
 void GSM_power_down(void);
 void GSM_READY(void);
-// uint8_t GSM_HTTP_sendDataToServer(char *payload); // HTTP upload replaced by MQTT
+#if (USE_HTTP_UPLOAD == 1)
+uint8_t GSM_HTTP_sendDataToServer(char *payload);
+#endif
 uint8_t GSM_time_sync(char *url);
 uint8_t GSM_httpGet(char *url, char *resp);
 uint8_t GSM_MQTT_sendDataToServer(char *data);
