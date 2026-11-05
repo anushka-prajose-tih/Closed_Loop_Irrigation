@@ -14,6 +14,16 @@ extern char print_char[200];
 
 TIME_TypeDef timeObj;
 
+#define NET_REG_TIMEOUT_MS      90000U  // first registration after power-up can take ~50 s
+#define QLTS_TIMEOUT_MS         60000U  // network time can arrive well after registration
+#define QIACT_TIMEOUT_MS        60000U
+#define QIACT_ATTEMPTS          3U      // activation often fails right after registration
+#define QIACT_RETRY_DELAY_MS    5000U
+
+static char *_waitForLine(const char *token, uint32_t timeout);
+static char *_sendCommand(const char *cmd, const char *token, uint32_t timeout);
+static uint8_t _waitForRegistration(uint32_t timeout);
+
 void GSM_init(UART_HandleTypeDef *_huart)
 {
 	huart = _huart;
@@ -228,7 +238,6 @@ uint8_t GSM_time_sync(char *url)
 	char dataBuffForTime[120] = {0};
 	uint8_t ret = RESET;
 	uint8_t retry = 0;
-	char *AtCommand;
 
 	while (!GSM_networkCheck())
 	{
@@ -237,58 +246,33 @@ uint8_t GSM_time_sync(char *url)
 			return RESET;
 	}
 
-	AtCommand = "AT+QLTS=1\r";
-	GSM_txData(AtCommand, strlen(AtCommand));
-	GSM_resetRxBuff();
-	while (responseTimeOut())
-		;
-
-	while (GSM_getrxState())
-		;
-
-	for (size_t i = 0; i + 26 < RX_buff_index; i++)
+	/* The modem only knows the time once it has registered and received the
+	   network's time broadcast, which can take a while after power-up, so
+	   wait for registration and keep asking before falling back to HTTP. */
+	if (_waitForRegistration(NET_REG_TIMEOUT_MS))
 	{
-		if (memcmp(&aRxBuffer[i], "+QLTS:", 6) == 0)
+		uint32_t startTime = HAL_GetTick();
+		do
 		{
-			char year[3] = {0};
-			char month[3] = {0};
-			char date[3] = {0};
-			char hour[3] = {0};
-			char min[3] = {0};
-			char sec[3] = {0};
+			/* +QLTS: "yyyy/MM/dd,hh:mm:ss+zz,dst" - already GMT; zz is only
+			   the zone offset and must not be applied */
+			char *p = _sendCommand("AT+QLTS=1\r", "+QLTS:", 3000);
+			int yr, mo, dd, hh, mi, ss;
 
-			year[0] = aRxBuffer[i + 10];
-			year[1] = aRxBuffer[i + 11];
-			timeObj.year = atoi(year);
-			if (timeObj.year < 24)
+			if (p != NULL && sscanf(p, "+QLTS: \"%d/%d/%d,%d:%d:%d", &yr, &mo, &dd, &hh, &mi, &ss) == 6 && yr >= 2024)
 			{
-				break;
+				timeObj.year = (uint8_t)(yr % 100);
+				timeObj.month = (uint8_t)mo;
+				timeObj.date = (uint8_t)dd;
+				timeObj.hours = (uint8_t)hh;
+				timeObj.minutes = (uint8_t)mi;
+				timeObj.seconds = (uint8_t)ss;
+				rtc_set_time(timeObj);
+				return SET;
 			}
-
-			month[0] = aRxBuffer[i + 13];
-			month[1] = aRxBuffer[i + 14];
-			timeObj.month = atoi(month);
-
-			date[0] = aRxBuffer[i + 16];
-			date[1] = aRxBuffer[i + 17];
-			timeObj.date = atoi(date);
-
-			hour[0] = aRxBuffer[i + 19];
-			hour[1] = aRxBuffer[i + 20];
-			timeObj.hours = atoi(hour);
-
-			min[0] = aRxBuffer[i + 22];
-			min[1] = aRxBuffer[i + 23];
-			timeObj.minutes = atoi(min);
-
-			sec[0] = aRxBuffer[i + 25];
-			sec[1] = aRxBuffer[i + 26];
-			timeObj.seconds = atoi(sec);
-
-			rtc_set_time(timeObj);
-
-			return SET;
-		}
+			HAL_Delay(5000);
+		} while (HAL_GetTick() - startTime < QLTS_TIMEOUT_MS);
+		serial_print("Network time not received, trying HTTP");
 	}
 
 	ret = GSM_httpGet(url, dataBuffForTime);
@@ -302,8 +286,6 @@ uint8_t GSM_time_sync(char *url)
 }
 
 #if (USE_HTTP_UPLOAD == 1)
-static char *_waitForLine(const char *token, uint32_t timeout);
-
 /* HTTP POST upload to SERVER_URL - the alternative to the MQTT "data"
    publish, selected by USE_HTTP_UPLOAD in GSM_EC200U.h */
 uint8_t GSM_HTTP_sendDataToServer(char *data)
@@ -363,24 +345,18 @@ uint8_t GSM_HTTP_sendDataToServer(char *data)
 
 	memset(tempBuff, 0, sizeof(tempBuff));
 	snprintf(tempBuff, sizeof(tempBuff), "AT+QHTTPURL=%d,80\r", strlen(SERVER_URL));
-	GSM_txData(tempBuff, strlen(tempBuff));
+	/* After CONNECT the modem takes the next <len> bytes as the URL, so only
+	   send it once CONNECT is seen, and never bail out after it */
+	if (_sendCommand(tempBuff, "CONNECT", 5000) == NULL)
+	{
+		serial_print("HTTP: no CONNECT for the URL");
+		return RESET;
+	}
+	GSM_txData(SERVER_URL, strlen(SERVER_URL));
 	GSM_resetRxBuff();
 	while (responseTimeOut())
 		;
-	printf("Received = %s", aRxBuffer);
-	char *tempResp = "CONNECT";
-	if (RX_buff_index >= 9 && !memcmp(aRxBuffer + (RX_buff_index - 9), tempResp, strlen(tempResp)))
-	{
-		GSM_txData(SERVER_URL, strlen(SERVER_URL));
-		GSM_resetRxBuff();
-		while (responseTimeOut())
-			;
-		if (_checkOKinResp(aRxBuffer + RX_buff_index - 4) != SET)
-		{
-			return RESET;
-		}
-	}
-	else
+	if (_checkOKinResp(aRxBuffer + RX_buff_index - 4) != SET)
 	{
 		return RESET;
 	}
@@ -462,10 +438,7 @@ uint8_t GSM_httpGet(char *url, char *resp)
 
 	char tempBuff[60];
 	memset(tempBuff, 0, sizeof(tempBuff));
-	sprintf(tempBuff, "AT+QICSGP=1,1,\"%s\","
-					  ","
-					  ",1\r",
-			opratorAPN);
+	sprintf(tempBuff, "AT+QICSGP=1,1,\"%s\",\"\",\"\",1\r", opratorAPN);
 	GSM_txData(tempBuff, strlen(tempBuff));
 	GSM_resetRxBuff();
 	while (responseTimeOut())
@@ -485,23 +458,20 @@ uint8_t GSM_httpGet(char *url, char *resp)
 
 	memset(tempBuff, 0, sizeof(tempBuff));
 	snprintf(tempBuff, sizeof(tempBuff), "AT+QHTTPURL=%d,80\r", strlen(url));
-	GSM_txData(tempBuff, strlen(tempBuff));
+	/* The reply is "\r\nCONNECT\r\n", so search for it rather than expect it
+	   at the end of the buffer. After CONNECT the modem takes the next <len>
+	   bytes as the URL: bailing out there left it swallowing the following
+	   AT commands for up to 80 s. */
+	if (_sendCommand(tempBuff, "CONNECT", 5000) == NULL)
+	{
+		serial_print("HTTP: no CONNECT for the URL");
+		return RESET;
+	}
+	GSM_txData(url, strlen(url));
 	GSM_resetRxBuff();
 	while (responseTimeOut())
 		;
-	char *tempResp = "CONNECT";
-	if (RX_buff_index >= strlen(tempResp) && !memcmp(aRxBuffer + (RX_buff_index - strlen(tempResp)), tempResp, strlen(tempResp)))
-	{
-		GSM_txData(url, strlen(url));
-		GSM_resetRxBuff();
-		while (responseTimeOut())
-			;
-		if (_checkOKinResp(aRxBuffer + RX_buff_index - 4) != SET)
-		{
-			return RESET;
-		}
-	}
-	else
+	if (_checkOKinResp(aRxBuffer + RX_buff_index - 4) != SET)
 	{
 		return RESET;
 	}
@@ -747,19 +717,58 @@ uint8_t GSM_MQTT_SSL_sendDataToServer(char *data)
  * fetches it, so nothing is lost while the MCU is busy with a sensor cycle.
  * ------------------------------------------------------------------------- */
 
-/* Wait for `token` followed by the end of its line. NULL on timeout or ERROR. */
-static char *_waitForLine(const char *token, uint32_t timeout)
+/* Wait for `token` followed by the end of its line, searching from
+   aRxBuffer + from. NULL on timeout or ERROR. */
+static char *_waitForLineFrom(const char *token, uint16_t from, uint32_t timeout)
 {
 	uint32_t startTime = HAL_GetTick();
 	while (HAL_GetTick() - startTime < timeout)
 	{
-		char *p = strstr(aRxBuffer, token);
+		char *p = strstr(aRxBuffer + from, token);
 		if (p != NULL && strstr(p, "\r\n") != NULL)
 			return p;
-		if (strstr(aRxBuffer, "ERROR") != NULL)
+		if (strstr(aRxBuffer + from, "ERROR") != NULL)
 			return NULL;
 	}
 	return NULL;
+}
+
+static char *_waitForLine(const char *token, uint32_t timeout)
+{
+	return _waitForLineFrom(token, 0, timeout);
+}
+
+/* The idx-th comma-separated integer of a result line (0 = the first one),
+   or -1 if the line has no such field */
+static long _resultField(const char *s, uint8_t idx)
+{
+	for (; idx > 0; idx--)
+	{
+		while (*s != ',' && *s != '\r' && *s != '\0')
+			s++;
+		if (*s != ',')
+			return -1;
+		s++;
+	}
+	return strtol(s, NULL, 10);
+}
+
+/* p points at a "<token><result>,..." line from the modem's MQTT client, where
+   result 0 = done, 1 = retransmitting, 2 = failed. While it says 1, wait for
+   the next such line instead of treating it as a failure. Returns the line
+   with the final result, or NULL on timeout. */
+static char *_waitPastRetransmit(char *p, const char *token, uint32_t timeout)
+{
+	uint32_t startTime = HAL_GetTick();
+
+	while (p != NULL && _resultField(p + strlen(token), 0) == 1)
+	{
+		uint32_t elapsed = HAL_GetTick() - startTime;
+		if (elapsed >= timeout)
+			return NULL;
+		p = _waitForLineFrom(token, (uint16_t)(p - aRxBuffer) + 1U, timeout - elapsed);
+	}
+	return p;
 }
 
 static char *_sendCommand(const char *cmd, const char *token, uint32_t timeout)
@@ -782,10 +791,155 @@ uint8_t GSM_isAlive(void)
 	return _sendCommand("AT\r", "OK\r\n", 2000) != NULL;
 }
 
+/* Ask the modem why the last step failed, and log its replies */
+static void _logDiagnostics(void)
+{
+	static const char *const cmds[] = {
+		"AT+CPIN?\r",	   // SIM: READY, SIM PIN, or an error if not inserted
+		"AT+CFUN?\r",	   // radio: 1 = full functionality, 0/4 = radio off
+		"AT+QIGETERROR\r", // last TCP/IP error (activation, DNS, ...)
+		"AT+CEER\r",	   // network's reason for the last reject
+		"AT+CSQ\r",		   // signal: rssi 0-31, 99 = none
+		"AT+COPS?\r",	   // operator
+		"AT+QNWINFO\r",	   // access technology and band
+		"AT+CGATT?\r",	   // packet-domain attach
+	};
+
+	serial_print("---- GSM diagnostics ----");
+	for (uint8_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++)
+	{
+		_sendCommand(cmds[i], "OK\r\n", 5000);
+		serial_print(aRxBuffer);
+	}
+}
+
+/* <stat> from the AT+CEREG? (LTE) / AT+CREG? reply "+C(E)REG: <n>,<stat>",
+   or -1 if there was no reply */
+static long _registrationStatus(const char *cmd, const char *token)
+{
+	char *p = _sendCommand(cmd, token, 2000);
+
+	return (p != NULL) ? _resultField(p + strlen(token), 1) : -1;
+}
+
+/* Registered on the network, not merely answering AT+CREG? with OK */
+static uint8_t _waitForRegistration(uint32_t timeout)
+{
+	uint32_t startTime = HAL_GetTick();
+	long lteLogged = -2, gsmLogged = -2;
+
+	do
+	{
+		long lte = _registrationStatus("AT+CEREG?\r", "+CEREG:");
+		long gsm = _registrationStatus("AT+CREG?\r", "+CREG:");
+
+		if (lte == 1 || lte == 5 || gsm == 1 || gsm == 5)
+			return SET;
+		if (lte != lteLogged || gsm != gsmLogged)
+		{
+			/* Log only changes, so a long wait doesn't flood the log */
+			snprintf(print_char, sizeof(print_char),
+					 "GSM: registration LTE %ld, GSM %ld (1 home, 5 roaming, 2 searching, 3 denied, 0 not searching, -1 no reply)",
+					 lte, gsm);
+			serial_print(print_char);
+			lteLogged = lte;
+			gsmLogged = gsm;
+		}
+		HAL_Delay(2000);
+	} while (HAL_GetTick() - startTime < timeout);
+
+	serial_print("GSM: not registered on the network");
+	_logDiagnostics();
+	return RESET;
+}
+
+/* Data connection on PDP context 1, then public DNS on it. AT+QICSGP is
+   rejected while the context is active, so only configure and activate it
+   when it isn't up already. */
+static uint8_t _dataConnectionUp(void)
+{
+	char cmd[80];
+	uint8_t active = RESET;
+
+	if (_sendCommand("AT+QIACT?\r", "OK\r\n", 3000) != NULL && strstr(aRxBuffer, "+QIACT: 1,1") != NULL)
+	{
+		active = SET;
+	}
+	else
+	{
+		snprintf(cmd, sizeof(cmd), "AT+QICSGP=1,1,\"%s\",\"\",\"\",1\r", opratorAPN);
+		if (_sendCommand(cmd, "OK\r\n", 5000) == NULL)
+		{
+			serial_print("GSM: could not set the APN");
+			return RESET;
+		}
+		for (uint8_t i = 0; i < QIACT_ATTEMPTS && !active; i++)
+		{
+			if (i > 0U)
+				HAL_Delay(QIACT_RETRY_DELAY_MS);
+			active = (_sendCommand("AT+QIACT=1\r", "OK\r\n", QIACT_TIMEOUT_MS) != NULL);
+		}
+		if (!active)
+		{
+			serial_print("GSM: could not activate the data connection");
+			_logDiagnostics();
+			return RESET;
+		}
+		_sendCommand("AT+QIACT?\r", "OK\r\n", 3000);
+	}
+	serial_print(aRxBuffer); // +QIACT: 1,1,1,"<assigned IP>"
+
+	snprintf(cmd, sizeof(cmd), "AT+QIDNSCFG=1,%s\r", GSM_DNS_SERVERS);
+	if (_sendCommand(cmd, "OK\r\n", 5000) == NULL)
+		serial_print("GSM: could not set the DNS servers");
+	return SET;
+}
+
+static const char *_qmtopenReason(long result)
+{
+	switch (result)
+	{
+	case -1:
+		return "failed to open network";
+	case 1:
+		return "wrong parameter";
+	case 2:
+		return "MQTT identifier occupied";
+	case 3:
+		return "failed to activate PDP context";
+	case 4:
+		return "failed to resolve broker name (DNS)";
+	case 5:
+		return "network connection error";
+	default:
+		return "no result (timeout or ERROR)";
+	}
+}
+
+static const char *_connackReason(long retCode)
+{
+	switch (retCode)
+	{
+	case 1:
+		return "unacceptable protocol version";
+	case 2:
+		return "client ID rejected";
+	case 3:
+		return "server unavailable";
+	case 4:
+		return "bad username or password";
+	case 5:
+		return "not authorized";
+	default:
+		return "no CONNACK";
+	}
+}
+
 uint8_t GSM_MQTT_connect(const char *clientId)
 {
 	char cmd[120];
 	char *p;
+	long result;
 	uint8_t retry = 0;
 
 	if (clientId == NULL)
@@ -793,6 +947,7 @@ uint8_t GSM_MQTT_connect(const char *clientId)
 		return RESET;
 	}
 
+	/* Also sets the APN up on its first success */
 	while (!GSM_networkCheck())
 	{
 		retry++;
@@ -800,63 +955,139 @@ uint8_t GSM_MQTT_connect(const char *clientId)
 			return RESET;
 	}
 
-	/* PDP context, as in the HTTP path. QIACT answers ERROR if it is already
-	   active, which is fine. */
-	snprintf(cmd, sizeof(cmd), "AT+QICSGP=1,1,\"%s\",\"\",\"\",1\r", opratorAPN);
-	_sendCommand(cmd, "OK\r\n", 5000);
-	_sendCommand("AT+QIACT=1\r", "OK\r\n", 30000);
+	if (!_waitForRegistration(NET_REG_TIMEOUT_MS) || !_dataConnectionUp())
+	{
+		return RESET;
+	}
 
 	/* Drop any session left open from before an MCU reset */
 	_mqttClose();
 
+	/* MQTT 3.1.1, and a keepalive short enough to keep the mobile network
+	   from dropping the idle connection */
+	_sendCommand("AT+QMTCFG=\"version\",0,4\r", "OK\r\n", 5000);
+	snprintf(cmd, sizeof(cmd), "AT+QMTCFG=\"keepalive\",0,%u\r", MQTT_KEEPALIVE_S);
+	_sendCommand(cmd, "OK\r\n", 5000);
 	if (_sendCommand("AT+QMTCFG=\"recv/mode\",0,1,0\r", "OK\r\n", 5000) == NULL)
 	{
 		serial_print("MQTT: recv/mode rejected");
 		return RESET;
 	}
 
+	/* +QMTOPEN: 0,<result> */
 	snprintf(cmd, sizeof(cmd), "AT+QMTOPEN=0,\"%s\",%s\r", MQTT_HOST, MQTT_PORT);
 	p = _sendCommand(cmd, "+QMTOPEN: 0,", 75000);
-	if (p == NULL || (p[12] != '0' && p[12] != '2')) // 2 = already open
+	result = (p != NULL) ? _resultField(p + 12, 0) : -99;
+	if (result == 2)
 	{
-		serial_print("MQTT: open failed");
+		/* A previous network connection is still allocated: close it, open again */
+		_sendCommand("AT+QMTCLOSE=0\r", "+QMTCLOSE: 0,", 5000);
+		p = _sendCommand(cmd, "+QMTOPEN: 0,", 75000);
+		result = (p != NULL) ? _resultField(p + 12, 0) : -99;
+	}
+	if (result != 0)
+	{
+		snprintf(print_char, sizeof(print_char), "MQTT: open %s:%s failed: %s", MQTT_HOST, MQTT_PORT, _qmtopenReason(result));
+		serial_print(print_char);
+		_logDiagnostics();
 		_mqttClose();
 		return RESET;
 	}
 
+	/* +QMTCONN: 0,<result>[,<ret_code>] */
 	snprintf(cmd, sizeof(cmd), "AT+QMTCONN=0,\"%s\"\r", clientId);
-	p = _sendCommand(cmd, "+QMTCONN: 0,", 15000);
-	if (p == NULL || strncmp(p + 12, "0,0", 3) != 0)
+	p = _waitPastRetransmit(_sendCommand(cmd, "+QMTCONN: 0,", 15000), "+QMTCONN: 0,", 30000);
+	if (p == NULL || _resultField(p + 12, 0) != 0 || _resultField(p + 12, 1) != 0)
 	{
-		serial_print("MQTT: connect failed");
+		snprintf(print_char, sizeof(print_char), "MQTT: connect failed: %s",
+				 _connackReason((p != NULL) ? _resultField(p + 12, 1) : -1));
+		serial_print(print_char);
 		_mqttClose();
 		return RESET;
 	}
 
+	/* +QMTSUB: 0,1,<result>,... (message ID 1) */
 	snprintf(cmd, sizeof(cmd), "AT+QMTSUB=0,1,\"%s\",1,\"%s\",1,\"%s\",1\r",
 			 MQTT_TOPIC_MOTOR_CMD, MQTT_TOPIC_OTA, MQTT_TOPIC_CMD);
-	p = _sendCommand(cmd, "+QMTSUB: 0,1,", 15000);
-	if (p == NULL || p[13] != '0')
+	p = _waitPastRetransmit(_sendCommand(cmd, "+QMTSUB: 0,1,", 15000), "+QMTSUB: 0,1,", 30000);
+	if (p == NULL || _resultField(p + 13, 0) != 0)
 	{
 		serial_print("MQTT: subscribe failed");
 		_mqttClose();
 		return RESET;
 	}
 
-	serial_print("MQTT: connected and subscribed");
+	snprintf(print_char, sizeof(print_char), "MQTT: connected to %s:%s and subscribed", MQTT_HOST, MQTT_PORT);
+	serial_print(print_char);
 	return SET;
 }
 
+/* Asks the modem for the MQTT link state. Logs why when it isn't connected:
+   no reply only means the modem didn't answer in time, not that the link is down. */
 uint8_t GSM_MQTT_isConnected(void)
 {
 	char *p;
+	long state;
 
 	if (_sendCommand("AT+QMTCONN?\r", "OK\r\n", 3000) == NULL)
 	{
+		serial_print("MQTT: no reply to AT+QMTCONN? (modem busy or not answering)");
 		return RESET;
 	}
+	/* "+QMTCONN: 0,<state>": 1 initializing, 2 connecting, 3 connected,
+	   4 disconnecting. No such line = the client isn't open at all. */
 	p = strstr(aRxBuffer, "+QMTCONN: 0,");
-	return (p != NULL && p[12] == '3'); // 3 = connected
+	if (p == NULL)
+	{
+		serial_print("MQTT: client not open (the modem has no MQTT link)");
+		return RESET;
+	}
+	state = _resultField(p + 12, 0);
+	if (state != 3)
+	{
+		snprintf(print_char, sizeof(print_char),
+				 "MQTT: link state %ld, not connected (1 initializing, 2 connecting, 4 disconnecting)", state);
+		serial_print(print_char);
+		return RESET;
+	}
+	return SET;
+}
+
+static const char *_qmtstatReason(long code)
+{
+	switch (code)
+	{
+	case 1:
+		return "connection closed or reset by the broker/network (also how a broker drops a client whose ID connected elsewhere)";
+	case 2:
+		return "keepalive PINGREQ timed out or failed";
+	case 3:
+		return "sending CONNECT timed out or failed";
+	case 4:
+		return "no CONNACK from the broker";
+	case 5:
+		return "client sent DISCONNECT and the broker closed the connection";
+	case 6:
+		return "modem gave up after repeated send failures";
+	case 7:
+		return "link not alive or broker unavailable";
+	default:
+		return "unknown";
+	}
+}
+
+/* Log the "+QMTSTAT: 0,<code>" URC (the modem reporting the MQTT link closed)
+   waiting in aRxBuffer. Call before any other command clears the buffer. */
+void GSM_MQTT_logLinkClosed(void)
+{
+	char *p = strstr(aRxBuffer, "+QMTSTAT:");
+	char *end = (p != NULL) ? strstr(p, "\r\n") : NULL;
+	long code = (p != NULL) ? _resultField(p + strlen("+QMTSTAT:"), 1) : -1;
+
+	/* Raw line too, in case the format differs from "+QMTSTAT: 0,<code>" */
+	snprintf(print_char, sizeof(print_char), "MQTT: modem reports link closed (%.*s): %s",
+			 (end != NULL) ? (int)(end - p) : 0, (p != NULL) ? p : "", _qmtstatReason(code));
+	serial_print(print_char);
 }
 
 uint8_t GSM_MQTT_publish(const char *topic, const char *payload, uint8_t qos, uint8_t retain)
@@ -887,9 +1118,17 @@ uint8_t GSM_MQTT_publish(const char *topic, const char *payload, uint8_t qos, ui
 	startTime = HAL_GetTick();
 	while (strchr(aRxBuffer, '>') == NULL)
 	{
-		if (HAL_GetTick() - startTime > 5000 || strstr(aRxBuffer, "ERROR") != NULL)
+		if (strstr(aRxBuffer, "ERROR") != NULL)
 		{
-			serial_print("MQTT: no publish prompt");
+			/* QMTPUBEX is rejected outright when the MQTT link is not connected */
+			snprintf(print_char, sizeof(print_char), "MQTT: publish to '%s' rejected with ERROR (link not connected?)", topic);
+			serial_print(print_char);
+			return RESET;
+		}
+		if (HAL_GetTick() - startTime > 5000)
+		{
+			snprintf(print_char, sizeof(print_char), "MQTT: no publish prompt for '%s' within 5 s", topic);
+			serial_print(print_char);
 			return RESET;
 		}
 	}
@@ -897,10 +1136,14 @@ uint8_t GSM_MQTT_publish(const char *topic, const char *payload, uint8_t qos, ui
 	snprintf(token, sizeof(token), "+QMTPUBEX: 0,%u,", id);
 	GSM_resetRxBuff();
 	GSM_txData((char *)payload, strlen(payload));
-	p = _waitForLine(token, 20000);
-	if (p == NULL || p[strlen(token)] != '0') // 0 = sent (and acked for QoS 1)
+	/* +QMTPUBEX: 0,<id>,<result>: 0 = sent (and acked for QoS 1),
+	   1 = retransmitting (no PUBACK yet), 2 = failed */
+	p = _waitPastRetransmit(_waitForLine(token, 20000), token, 30000);
+	if (p == NULL || _resultField(p + strlen(token), 0) != 0)
 	{
-		serial_print("MQTT: publish failed");
+		snprintf(print_char, sizeof(print_char), "MQTT: publish to '%s' failed (result %ld)", topic,
+				 (p != NULL) ? _resultField(p + strlen(token), 0) : -1L);
+		serial_print(print_char);
 		return RESET;
 	}
 	return SET;
@@ -983,10 +1226,16 @@ uint8_t GSM_MQTT_readMessage(char *topic, uint16_t topicSize, char *payload, uin
 uint8_t GSM_MQTT_eventPending(void)
 {
 	uint8_t events = 0;
+	char *p;
 
-	if (strstr(aRxBuffer, "+QMTRECV:") != NULL)
+	/* Only count a URC once its whole line is in: the main loop polls far
+	   faster than the modem sends (~87 us per byte), so acting on the bare
+	   token read "+QMTSTAT: 0,<code>" before the code had arrived */
+	p = strstr(aRxBuffer, "+QMTRECV:");
+	if (p != NULL && strstr(p, "\r\n") != NULL)
 		events |= MQTT_EVT_RECV;
-	if (strstr(aRxBuffer, "+QMTSTAT:") != NULL)
+	p = strstr(aRxBuffer, "+QMTSTAT:");
+	if (p != NULL && strstr(p, "\r\n") != NULL)
 		events |= MQTT_EVT_STAT;
 	return events;
 }

@@ -14,7 +14,7 @@ extern "C" {
    Rules 20.8/20.9. A build configuration can override it with
    -DUSE_HTTP_UPLOAD=0 or =1. */
 #ifndef USE_HTTP_UPLOAD
-#define USE_HTTP_UPLOAD 0
+#define USE_HTTP_UPLOAD 1
 #endif
 #if (USE_HTTP_UPLOAD != 0) && (USE_HTTP_UPLOAD != 1)
 #error "USE_HTTP_UPLOAD must be 0 (MQTT) or 1 (HTTP)"
@@ -22,17 +22,23 @@ extern "C" {
 
 #include "main.h"
 
-#define SIM_APN         "airtelgprs.com"
+
 #define TIME_SYNC_URL   "http://www.tih.iitb.ac.in/"
 #if (USE_HTTP_UPLOAD == 1)
 //Current URL is test URL for agriOS project.
-#define SERVER_URL      "http://15.206.109.220/dev/v1/ingest"     //Active URL : "https://eagris.tihiitb.org/eagris/v1/sensor-data/public/receive/data"
+#define SERVER_URL      "https://eagris.tihiitb.org/eagris/v1/sensor-data/public/receive/data"     //Active URL : "http://15.206.109.220/dev/v1/ingest"
 #endif
 /* Broker as in mqtt_device.h (EC200 MQTT device): public, port 1883, no login
    (GSM_MQTT_connect() sends no username/password) */
 #define MQTT_HOST       "broker.hivemq.com"    // was "test.mosquitto.org", earlier "mqtt.tihiitb.org"
 #define MQTT_SSL_HOST   "mqtt.tihiitb.org"
 #define MQTT_PORT       "1883"
+/* Mobile networks drop idle TCP connections, often within a minute, so the
+   MQTT keepalive must be shorter than the modem's default */
+#define MQTT_KEEPALIVE_S        30U
+/* Public DNS for the data connection: the network's own resolver has failed
+   to look up the broker (+QMTOPEN: 0,4) on the Airtel IoT SIM */
+#define GSM_DNS_SERVERS         "\"8.8.8.8\",\"1.1.1.1\""
 #define MQTT_DEVICE_ID  "TIH_NODE_01"
 #define MQTT_TOKEN      "Canopy/data"
 #define MQTT_USER       "user2"
@@ -74,6 +80,7 @@ uint8_t GSM_MQTT_isConnected(void);
 uint8_t GSM_MQTT_publish(const char *topic, const char *payload, uint8_t qos, uint8_t retain);
 uint8_t GSM_MQTT_readMessage(char *topic, uint16_t topicSize, char *payload, uint16_t payloadSize);
 uint8_t GSM_MQTT_eventPending(void);
+void GSM_MQTT_logLinkClosed(void);
 uint8_t GSM_getrxState(void);
 uint8_t GSM_networkCheck(void);
 uint8_t responseTimeOut(void);

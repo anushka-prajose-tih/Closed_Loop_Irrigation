@@ -1765,6 +1765,11 @@ void MQTT_app_poll(void)
   char payload[512];
   uint8_t events = GSM_MQTT_eventPending();
 
+  /* Log why the modem closed the link now: any command below (even the
+     motor_stop() publish) clears the buffer holding the +QMTSTAT URC */
+  if (events & MQTT_EVT_STAT)
+    GSM_MQTT_logLinkClosed();
+
   if (motor_running && HAL_GetTick() - motor_start_tick >= motor_duration_ms)
     motor_stop();
 
