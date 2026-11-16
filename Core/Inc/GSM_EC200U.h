@@ -81,6 +81,17 @@ uint8_t GSM_MQTT_publish(const char *topic, const char *payload, uint8_t qos, ui
 uint8_t GSM_MQTT_readMessage(char *topic, uint16_t topicSize, char *payload, uint16_t payloadSize);
 uint8_t GSM_MQTT_eventPending(void);
 void GSM_MQTT_logLinkClosed(void);
+void GSM_txDataQuiet(char *data, uint16_t length);
+/* HTTP with caller-built requests and modem file access (used by ota.c) */
+uint8_t GSM_netReady(void);
+long GSM_HTTP_rawRequest(uint8_t isPost, const char *url, const char *request, uint32_t timeoutS);
+int32_t GSM_HTTP_readBody(char *out, uint16_t outSize);
+uint8_t GSM_HTTP_readToFile(const char *name);
+void GSM_HTTP_endRaw(void);
+void GSM_fileDelete(const char *name);
+long GSM_fileOpen(const char *name);
+void GSM_fileClose(long handle);
+int32_t GSM_fileRead(long handle, uint8_t *out, uint16_t len);
 uint8_t GSM_getrxState(void);
 uint8_t GSM_networkCheck(void);
 uint8_t responseTimeOut(void);

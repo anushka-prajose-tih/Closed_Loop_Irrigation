@@ -164,7 +164,8 @@ flowchart TD
     A([Power-on / MCU reset]) --> B["HAL + MX_*_Init peripherals"]
     B --> C["GSM_init, flash init,<br>SSD1306 init, rotary encoder init"]
     C --> D["bootup_flag = 1"]
-    D --> L{"bootup_flag or<br>RTC_alarm_flag set?"}
+    D --> OB[["OTA_BootCheck()<br>count trial boot of an update;<br>roll back after 3 unconfirmed boots"]]
+    OB --> L{"bootup_flag or<br>RTC_alarm_flag set?"}
     L -->|yes| APP[["App_operation()"]]
     APP --> CLR["RTC_alarm_flag = 0"]
     CLR --> P
@@ -187,8 +188,9 @@ flowchart TD
     D -->|yes| E{"Modem answers AT?"}
     E -->|no| F["GSM_power_up()"]
     E -->|yes| G
-    F --> G["GSM_time_sync()<br>AT+QLTS, HTTP fallback"]
-    G --> H["MQTT_app_connect()<br>drop old session, connect, subscribe,<br>publish retained motor_status"]
+    F --> G["GSM_time_sync()<br>wait for registration, AT+QLTS, HTTP fallback"]
+    G --> OTA[["OTA_Poll() (once per MCU boot)<br>ask ThingsBoard which firmware is assigned;<br>install it and reset into it if different"]]
+    OTA --> H["MQTT_app_connect()<br>drop old session, connect, subscribe,<br>publish retained motor_status"]
     D -->|no| I
     H --> I["Read RTC time (GMT)"]
     I --> J{"03:15 GMT and<br>not a boot cycle?"}
@@ -296,6 +298,32 @@ flowchart TD
 - At post time, each unsent record is converted into a JSON payload and published on the MQTT `data` topic.
 - The read pointer only advances after a successful publish, so unsent data stays in flash and is retried later. A pass gives up after 5 consecutive failures.
 - Changing the record layout makes records already in flash unreadable, so erase the log when deploying a layout change.
+
+---
+
+## Firmware Updates (OTA)
+The STM32G0B1RE's 512 KB of flash is two 256 KB banks. The firmware runs from one bank, and updates are written to the other, so a failed or interrupted update never touches the running firmware.
+
+```mermaid
+flowchart TD
+    A[["Every boot (power-on, or the daily 03:15 GMT restart)"]] --> B["Read shared attributes from ThingsBoard:<br>fw_title, fw_version, fw_size, fw_checksum"]
+    B --> C{"Firmware assigned?"}
+    C -->|no| Z([Normal operation])
+    C -->|yes| S{"SHA-256 of the running firmware<br>= fw_checksum?"}
+    S -->|yes| U["Report fw_state UPDATED"] --> Z
+    S -->|no| D["Download into the modem's file system<br>(fw_state DOWNLOADING, DOWNLOADED)"]
+    D --> E["Copy into the inactive bank,<br>verify SHA-256 from flash (VERIFIED)"]
+    E --> F["Swap banks, reset into the new firmware (UPDATING)"]
+    F --> G{"New firmware reaches<br>ThingsBoard within 3 boots?"}
+    G -->|yes| H["Report UPDATED"]
+    G -->|no| R["Swap back to the previous firmware,<br>report FAILED"]
+```
+
+- The update server is **ThingsBoard** (`eu.thingsboard.cloud`), through its device HTTP API over HTTPS. The server address is in `Core/Inc/ota.h`. The device's access token goes in `Core/Inc/ota_credentials.h`, which is git-ignored; OTA stays disabled without it.
+- To update: in ThingsBoard, create an OTA update package (firmware, checksum algorithm SHA256) from the `.bin` produced by the normal build, then assign it to the device or its device profile. The device installs it at its next boot.
+- The access token is compiled into the firmware, so a `.bin` built for one device should only be assigned to that device.
+- The application is limited to one bank (256 KB) by the linker script.
+- The watchdog (IWDG) must be enabled in the `.ioc` so that an update that hangs is reset and rolled back.
 
 ---
 

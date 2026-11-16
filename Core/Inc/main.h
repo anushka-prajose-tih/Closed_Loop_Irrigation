@@ -72,6 +72,7 @@ void Read_data(time_t ts);
 uint32_t ADC_read_voltage(uint32_t channel);
 void Oled_Data_display();
 void GSM_post_sequence(time_t ts);
+void App_WatchdogRefresh(void);
 
 union ByteToUint32 {
   uint8_t bytes[4];

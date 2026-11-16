@@ -1,8 +1,10 @@
 #include "GSM_EC200U.h"
 
 /* Holds a full command response. Must fit the modem echoing an ~800-byte MQTT
-   publish payload plus the +QMTPUBEX result, and an incoming OTA message. Was [100]. */
-char aRxBuffer[1024];
+   publish payload plus the +QMTPUBEX result, an OTA server JSON reply
+   (~1-2 KB) from AT+QHTTPREAD, and a 1 KB AT+QFREAD firmware chunk with its
+   framing. Reception stops when it is full. Was [100], then [1024]. */
+char aRxBuffer[4096];
 uint16_t RX_buff_index = 0;
 uint8_t rxStateFlag = RESET;
 UART_HandleTypeDef *huart;
@@ -60,7 +62,9 @@ void GSM_UART_RxCpltCallback(void)
 	updateLastRespTime();
 }
 
-void GSM_txData(char *data, uint16_t length)
+/* Interrupt-driven send: `data` must stay valid until the transmission ends
+   (the next send waits for that). */
+static void _tx(char *data, uint16_t length)
 {
 	if (huart == NULL || data == NULL)
 	{
@@ -76,7 +80,20 @@ void GSM_txData(char *data, uint16_t length)
 		printDisplay_level(35, "gtd");
 		Error_Handler();
 	}
-	serial_print((char *)data);
+}
+
+void GSM_txData(char *data, uint16_t length)
+{
+	_tx(data, length);
+	if (data != NULL)
+		serial_print((char *)data);
+}
+
+/* Like GSM_txData() but without echoing to the debug log, for data that
+   carries a credential (an OTA access token) */
+void GSM_txDataQuiet(char *data, uint16_t length)
+{
+	_tx(data, length);
 }
 
 void GSM_rxData(char *data, uint16_t length)
@@ -725,6 +742,8 @@ static char *_waitForLineFrom(const char *token, uint16_t from, uint32_t timeout
 	while (HAL_GetTick() - startTime < timeout)
 	{
 		char *p = strstr(aRxBuffer + from, token);
+
+		App_WatchdogRefresh(); // waits run up to 75 s (QMTOPEN), past the watchdog timeout
 		if (p != NULL && strstr(p, "\r\n") != NULL)
 			return p;
 		if (strstr(aRxBuffer + from, "ERROR") != NULL)
@@ -1240,6 +1259,225 @@ uint8_t GSM_MQTT_eventPending(void)
 	return events;
 }
 
+/* ---------------------------------------------------------------------------
+ * HTTP with a caller-built request, and the modem's file system (UFS).
+ * Used by the OTA client (ota.c): the request text (method, headers, JSON body) is built by the caller, which
+ * AT+QHTTPCFG="requestheader",1 allows, and firmware images are downloaded
+ * into the modem's UFS, then read back in chunks.
+ * ------------------------------------------------------------------------- */
+
+/* Registered, and the data connection is up (the APN is set up first if needed) */
+uint8_t GSM_netReady(void)
+{
+	uint8_t retry = 0;
+
+	while (!GSM_networkCheck())
+	{
+		retry++;
+		if (retry > 2)
+			return RESET;
+	}
+	return (_waitForRegistration(NET_REG_TIMEOUT_MS) && _dataConnectionUp()) ? SET : RESET;
+}
+
+/* Sends one HTTP request. `request` is the complete request text (request
+   line, headers, blank line and, for POST, the body): the modem connects to
+   the host in `url` and sends it as-is, without echoing it to the debug log.
+   Returns the HTTP status, or -1 if no response arrived. The response body
+   stays in the modem for GSM_HTTP_readBody() / GSM_HTTP_readToFile().
+   Call GSM_HTTP_endRaw() afterwards: the other HTTP functions expect
+   requestheader 0. */
+long GSM_HTTP_rawRequest(uint8_t isPost, const char *url, const char *request, uint32_t timeoutS)
+{
+	char cmd[64];
+	const char *token = isPost ? "+QHTTPPOST:" : "+QHTTPGET:";
+	uint16_t len = (uint16_t)strlen(request);
+	char *p;
+	long err;
+
+	_sendCommand("AT+QHTTPCFG=\"contextid\",1\r", "OK\r\n", 3000);
+	_sendCommand("AT+QHTTPCFG=\"requestheader\",1\r", "OK\r\n", 3000);
+	_sendCommand("AT+QHTTPCFG=\"responseheader\",0\r", "OK\r\n", 3000);
+	if (strncmp(url, "https://", 8) == 0)
+	{
+		/* TLS on SSL context 1. seclevel 0 = no server-certificate check:
+		   encrypted, but the server isn't authenticated (no CA certificate in
+		   the modem). SNI is needed by cloud hosts that serve many domains. */
+		_sendCommand("AT+QHTTPCFG=\"sslctxid\",1\r", "OK\r\n", 3000);
+		_sendCommand("AT+QSSLCFG=\"sslversion\",1,4\r", "OK\r\n", 3000);
+		_sendCommand("AT+QSSLCFG=\"ciphersuite\",1,0xFFFF\r", "OK\r\n", 3000);
+		_sendCommand("AT+QSSLCFG=\"seclevel\",1,0\r", "OK\r\n", 3000);
+		_sendCommand("AT+QSSLCFG=\"sni\",1,1\r", "OK\r\n", 3000);
+	}
+
+	/* After CONNECT the modem takes the next <len> bytes as the URL. The URL
+	   can carry a credential (an access token in the path), so it isn't echoed. */
+	snprintf(cmd, sizeof(cmd), "AT+QHTTPURL=%u,80\r", (unsigned int)strlen(url));
+	if (_sendCommand(cmd, "CONNECT", 5000) == NULL)
+	{
+		serial_print("HTTP: no CONNECT for the URL");
+		return -1;
+	}
+	GSM_resetRxBuff();
+	GSM_txDataQuiet((char *)url, (uint16_t)strlen(url));
+	if (_waitForLine("OK\r\n", 10000) == NULL)
+	{
+		serial_print("HTTP: URL rejected");
+		return -1;
+	}
+
+	/* Argument order differs: GET <rsptime>,<len>,<input_time>;
+	   POST <len>,<input_time>,<rsptime> */
+	if (isPost)
+		snprintf(cmd, sizeof(cmd), "AT+QHTTPPOST=%u,10,%lu\r", len, timeoutS);
+	else
+		snprintf(cmd, sizeof(cmd), "AT+QHTTPGET=%lu,%u,10\r", timeoutS, len);
+	if (_sendCommand(cmd, "CONNECT", 10000) == NULL)
+	{
+		serial_print("HTTP: no CONNECT for the request");
+		return -1;
+	}
+	GSM_resetRxBuff();
+	GSM_txDataQuiet((char *)request, len);
+
+	/* "+QHTTPGET: <err>[,<status>[,<content_length>]]", same for POST */
+	p = _waitForLine(token, (timeoutS + 10U) * 1000U);
+	if (p == NULL)
+	{
+		serial_print("HTTP: no response");
+		return -1;
+	}
+	err = _resultField(p + strlen(token), 0);
+	if (err != 0)
+	{
+		snprintf(print_char, sizeof(print_char), "HTTP: request failed, modem error %ld", err);
+		serial_print(print_char);
+		return -1;
+	}
+	return _resultField(p + strlen(token), 1);
+}
+
+/* Copies the body of the last response into out, NUL-terminated. Returns its
+   length, or -1 if it couldn't be read or doesn't fit. */
+int32_t GSM_HTTP_readBody(char *out, uint16_t outSize)
+{
+	/* "\r\nCONNECT\r\n<body>\r\nOK\r\n\r\n+QHTTPREAD: <err>\r\n" */
+	char *end = _sendCommand("AT+QHTTPREAD=30\r", "+QHTTPREAD:", 40000);
+	char *start;
+	uint32_t len;
+
+	if (end == NULL || _resultField(end + strlen("+QHTTPREAD:"), 0) != 0)
+	{
+		serial_print("HTTP: could not read the response body");
+		return -1;
+	}
+	start = strstr(aRxBuffer, "CONNECT\r\n");
+	if (start == NULL)
+		return -1;
+	start += strlen("CONNECT\r\n");
+	/* The body ends at the last "\r\nOK\r\n" before the result line */
+	while (end > start && strncmp(end, "\r\nOK\r\n", 6) != 0)
+		end--;
+	if (strncmp(end, "\r\nOK\r\n", 6) != 0)
+		return -1;
+	len = (uint32_t)(end - start);
+	if (len >= outSize)
+	{
+		serial_print("HTTP: response body too large");
+		return -1;
+	}
+	memcpy(out, start, len);
+	out[len] = '\0';
+	return (int32_t)len;
+}
+
+/* Saves the body of the last response to the modem file UFS:<name> */
+uint8_t GSM_HTTP_readToFile(const char *name)
+{
+	char cmd[64];
+	char *p;
+
+	snprintf(cmd, sizeof(cmd), "AT+QHTTPREADFILE=\"UFS:%s\",80\r", name);
+	p = _sendCommand(cmd, "+QHTTPREADFILE:", 200000);
+	if (p == NULL || _resultField(p + strlen("+QHTTPREADFILE:"), 0) != 0)
+	{
+		serial_print("HTTP: could not save the response to a file");
+		return RESET;
+	}
+	return SET;
+}
+
+/* Back to plain requests (the modem builds the headers), as the HTTP upload
+   and the time-sync fallback expect */
+void GSM_HTTP_endRaw(void)
+{
+	_sendCommand("AT+QHTTPCFG=\"requestheader\",0\r", "OK\r\n", 3000);
+}
+
+void GSM_fileDelete(const char *name)
+{
+	char cmd[48];
+
+	snprintf(cmd, sizeof(cmd), "AT+QFDEL=\"UFS:%s\"\r", name);
+	_sendCommand(cmd, "OK\r\n", 5000); // ERROR if it doesn't exist, which is fine
+}
+
+/* Opens UFS:<name> read-only. Returns the file handle, or -1. */
+long GSM_fileOpen(const char *name)
+{
+	char cmd[48];
+	char *p;
+
+	snprintf(cmd, sizeof(cmd), "AT+QFOPEN=\"UFS:%s\",2\r", name);
+	p = _sendCommand(cmd, "+QFOPEN:", 5000);
+	return (p != NULL) ? _resultField(p + strlen("+QFOPEN:"), 0) : -1;
+}
+
+void GSM_fileClose(long handle)
+{
+	char cmd[32];
+
+	snprintf(cmd, sizeof(cmd), "AT+QFCLOSE=%ld\r", handle);
+	_sendCommand(cmd, "OK\r\n", 5000);
+}
+
+/* Reads up to len bytes from an open file. Returns the number read (0 at the
+   end of the file), or -1. */
+int32_t GSM_fileRead(long handle, uint8_t *out, uint16_t len)
+{
+	char cmd[40];
+	char *p;
+	char *data;
+	long n;
+	uint32_t startTime;
+
+	/* "CONNECT <n>\r\n<n raw bytes>\r\nOK\r\n" - the bytes can contain NULs,
+	   so they are located by count, not by string search */
+	snprintf(cmd, sizeof(cmd), "AT+QFREAD=%ld,%u\r", handle, len);
+	p = _sendCommand(cmd, "CONNECT", 5000);
+	if (p == NULL)
+		return -1;
+	n = strtol(p + strlen("CONNECT"), NULL, 10);
+	data = strstr(p, "\r\n") + 2;
+	if (n < 0 || n > (long)len)
+		return -1;
+
+	startTime = HAL_GetTick();
+	while ((uint32_t)(data - aRxBuffer) + (uint32_t)n + 6U > RX_buff_index)
+	{
+		App_WatchdogRefresh();
+		if (HAL_GetTick() - startTime > 10000U)
+		{
+			serial_print("GSM: file read timed out");
+			return -1;
+		}
+	}
+	if (memcmp(data + n, "\r\nOK\r\n", 6) != 0)
+		return -1;
+	memcpy(out, data, (size_t)n);
+	return (int32_t)n;
+}
+
 uint8_t GSM_getrxState(void)
 {
 	return rxStateFlag;
@@ -1350,6 +1588,8 @@ uint8_t GSM_networkCheck(void)
 uint8_t responseTimeOut(void)
 {
 	long currTime = HAL_GetTick();
+
+	App_WatchdogRefresh(); // called in tight wait loops after every old-style command
 	if (currTime - lastRespTime > TIME_OUT)
 	{
 		return RESET;
@@ -1376,5 +1616,6 @@ inline void _waitForResp(uint16_t timeout, uint16_t len)
 	long startTime = HAL_GetTick();
 	while (HAL_GetTick() - startTime < timeout && RX_buff_index < len)
 	{
+		App_WatchdogRefresh();
 	}
 }

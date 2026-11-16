@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "ota.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -217,8 +217,12 @@ int main(void)
   ROT_ENC_init(&callBacks);
 
   bootup_flag = 1;
-  printDisplay("Booting....");
+  //printDisplay("Booting....");
   serial_print("-----------------------BOOTUP------------------\r\n\r\n\r\n");
+  serial_print("---------------------FW Ver. 1.0----------------\r\n\r\n\r\n");
+
+  /* Trial boot of a firmware update: counts it, rolls back if needed (may reset) */
+  OTA_BootCheck();
 
   /* USER CODE END 2 */
 
@@ -229,6 +233,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    App_WatchdogRefresh();
+
     if (bootup_flag == SET || RTC_alarm_flag == SET)
     {
       /* Perform the periodic data collection and GSM upload sequence */
@@ -246,6 +252,7 @@ int main(void)
       /* Enter menu mode when the rotary encoder button is pressed */
       while (1)
       {
+        App_WatchdogRefresh();
         ROT_ENC_handler();
         printHandler();
       }
@@ -903,6 +910,9 @@ void App_operation()
     if (!GSM_isAlive())
       GSM_power_up();
     GSM_connected_flag = GSM_time_sync(TIME_SYNC_URL);
+    /* Once per MCU boot, including the daily 03:15 GMT restart: check
+       hawkBit for an update (resets into it if one is installed) */
+    OTA_Poll();
 #if (USE_HTTP_UPLOAD == 0)
     MQTT_app_connect();
 #endif
@@ -1807,6 +1817,34 @@ void MQTT_app_poll(void)
   GSM_resetRxBuff();
 }
 #endif /* USE_HTTP_UPLOAD == 0 */
+
+/* Feeds the independent watchdog, once it is enabled in the .ioc (CubeMX
+   then defines HAL_IWDG_MODULE_ENABLED and generates hiwdg). OTA rollback
+   relies on it to reset an image that hangs. Called from the main loop, the
+   menu loop, HAL_Delay() and the modem wait loops. */
+void App_WatchdogRefresh(void)
+{
+#if defined(HAL_IWDG_MODULE_ENABLED)
+  (void)HAL_IWDG_Refresh(&hiwdg);
+#endif
+}
+
+/* Replaces the HAL's weak HAL_Delay() so long waits (Modbus settling, modem
+   power-up, OLED pages) feed the watchdog */
+void HAL_Delay(uint32_t Delay)
+{
+  uint32_t tickstart = HAL_GetTick();
+  uint32_t wait = Delay;
+
+  if (wait < HAL_MAX_DELAY)
+  {
+    wait += (uint32_t)uwTickFreq;
+  }
+  while ((HAL_GetTick() - tickstart) < wait)
+  {
+    App_WatchdogRefresh();
+  }
+}
 
 /* USER CODE END 4 */
 
