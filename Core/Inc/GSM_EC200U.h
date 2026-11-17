@@ -66,6 +66,7 @@ void GSM_rxData(char *data, uint16_t length);
 void GSM_resetRxBuff(void);
 void GSM_power_up(void);
 void GSM_power_down(void);
+uint8_t GSM_powerDownWait(void);
 void GSM_READY(void);
 #if (USE_HTTP_UPLOAD == 1)
 uint8_t GSM_HTTP_sendDataToServer(char *payload);

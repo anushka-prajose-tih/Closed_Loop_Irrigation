@@ -149,6 +149,20 @@ void GSM_power_down()
 	serial_print(aRxBuffer);
 }
 
+/* Switches the modem off and waits for its "POWERED DOWN", plus a margin.
+   Used by the boot path in App_operation() to cold-start a modem left
+   running across an MCU reset; the margin keeps the following PWRKEY pulse
+   from landing on a modem still shutting down.
+   Returns SET once it reported powering down. */
+uint8_t GSM_powerDownWait(void)
+{
+	uint8_t off = (_sendCommand("AT+QPOWD=1\r", "POWERED DOWN", 30000) != NULL) ? SET : RESET;
+
+	HAL_Delay(2000);
+	serial_print(off ? "GSM: powered down" : "GSM: no POWERED DOWN reply");
+	return off;
+}
+
 void GSM_READY(void)
 {
 	GSM_resetRxBuff();

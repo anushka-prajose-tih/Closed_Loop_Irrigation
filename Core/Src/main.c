@@ -219,10 +219,10 @@ int main(void)
   bootup_flag = 1;
   //printDisplay("Booting....");
   serial_print("-----------------------BOOTUP------------------\r\n\r\n\r\n");
-  serial_print("---------------------FW Ver. 1.0----------------\r\n\r\n\r\n");
+  serial_print("---------------------FW Ver. 1.1----------------\r\n\r\n\r\n");
 
-  /* Trial boot of a firmware update: counts it, rolls back if needed (may reset) */
-  OTA_BootCheck();
+  /* OTA_BootCheck() runs from App_operation()'s boot branch, after the
+     modem power-cycle */
 
   /* USER CODE END 2 */
 
@@ -904,14 +904,35 @@ void App_operation()
 
   if (bootup_flag == 1)
   {
-    /* The modem now stays on, so after an MCU reset it may already be running;
-       pulsing PWRKEY then would switch it off. */
-    // GSM_power_up();
-    if (!GSM_isAlive())
-      GSM_power_up();
+    /* Once per MCU boot only: bootup_flag stays set (and this branch reruns
+       on every main-loop pass) until time syncs, and OTA_BootCheck() counts a
+       trial boot per call */
+    static uint8_t modem_boot_done = 0;
+
+    if (modem_boot_done == 0U)
+    {
+      modem_boot_done = 1U;
+      /* Cold-start the modem on every MCU boot. After a reset (OTA bank swap,
+         rollback, daily restart, debugger) it is usually still running with
+         the old image's data context and HTTP/SSL/MQTT sessions; the first
+         boot after an OTA swap then failed GSM_networkCheck() at AT+CGDCONT
+         on every try (field log, Nov 2026). Switch it off first if it
+         answers, and pulse PWRKEY only when it no longer answers: a pulse on
+         a running modem would switch it off instead. */
+      // GSM_power_up();
+      if (GSM_isAlive())
+        (void)GSM_powerDownWait();
+      if (!GSM_isAlive())
+        GSM_power_up();
+
+      /* Trial boot of a firmware update: counts it, rolls back if needed
+         (may reset). After the modem power-cycle, so a rollback always
+         starts from a freshly started modem. */
+      OTA_BootCheck();
+    }
     GSM_connected_flag = GSM_time_sync(TIME_SYNC_URL);
     /* Once per MCU boot, including the daily 03:15 GMT restart: check
-       hawkBit for an update (resets into it if one is installed) */
+       ThingsBoard for an update (resets into it if one is installed) */
     OTA_Poll();
 #if (USE_HTTP_UPLOAD == 0)
     MQTT_app_connect();

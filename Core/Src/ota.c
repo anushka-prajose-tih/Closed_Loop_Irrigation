@@ -607,9 +607,10 @@ static void _install(const char *title, const char *version, uint32_t size, cons
 	_state("UPDATING");
 	_setState(OTA_STATE_TRIAL, 0U, prefix, size);
 	serial_print("OTA: image verified, swapping banks and restarting");
+	/* The new image's boot path power-cycles the modem (App_operation()) */
 	_swapBanksAndReset();
 	_setState(OTA_STATE_NONE, 0U, 0U, 0U);
-	_fail("Could not switch flash banks", 0U);
+	serial_print("OTA: update failed: Could not switch flash banks");
 }
 
 /* ------------------------------------------------------------------- public */
@@ -690,6 +691,7 @@ void OTA_BootCheck(void)
 	_setFailed(trialPrefix);
 	_setState(OTA_STATE_ROLLED_BACK, 0U, 0U, 0U);
 	_swapBanksAndReset();
+	/* Swap failed: carry on here */
 	_setState(OTA_STATE_TRIAL, boots, trialPrefix, trialSize);
 }
 

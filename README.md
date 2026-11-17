@@ -53,7 +53,7 @@ The system is intended for agriculture and environmental monitoring use cases su
 ### 1. GSM Connectivity
 - Module: EC200U
 - Communication: UART via USART4
-- The modem stays powered and connected between cycles. After an MCU reset it is only powered up if it doesn't answer `AT`.
+- The modem stays powered and connected between cycles. Every MCU boot power-cycles it: if it still answers `AT` after the reset it is switched off first, then powered up, so the new boot never inherits the old data context or sessions.
 - Functions:
   - time synchronization (`AT+QLTS`, with an HTTP fallback)
   - MQTT connection to the broker set in `GSM_EC200U.h`, using `SAMBHAV_<uid>` as the client ID
@@ -164,8 +164,7 @@ flowchart TD
     A([Power-on / MCU reset]) --> B["HAL + MX_*_Init peripherals"]
     B --> C["GSM_init, flash init,<br>SSD1306 init, rotary encoder init"]
     C --> D["bootup_flag = 1"]
-    D --> OB[["OTA_BootCheck()<br>count trial boot of an update;<br>roll back after 3 unconfirmed boots"]]
-    OB --> L{"bootup_flag or<br>RTC_alarm_flag set?"}
+    D --> L{"bootup_flag or<br>RTC_alarm_flag set?"}
     L -->|yes| APP[["App_operation()"]]
     APP --> CLR["RTC_alarm_flag = 0"]
     CLR --> P
@@ -185,10 +184,16 @@ flowchart TD
     B -->|yes| C["flash_ready_flag = 1<br>read_address_map()"]
     B -->|no| D
     C --> D{"Boot cycle?"}
-    D -->|yes| E{"Modem answers AT?"}
+    D -->|yes| ONCE{"First pass since<br>MCU boot?"}
+    ONCE -->|yes| E{"Modem answers AT?"}
+    ONCE -->|no| G
+    E -->|yes| PD["GSM_powerDownWait()<br>AT+QPOWD=1, wait for POWERED DOWN"]
+    PD --> E2{"Modem still answers AT?"}
     E -->|no| F["GSM_power_up()"]
-    E -->|yes| G
-    F --> G["GSM_time_sync()<br>wait for registration, AT+QLTS, HTTP fallback"]
+    E2 -->|no| F
+    E2 -->|yes| OB
+    F --> OB[["OTA_BootCheck()<br>count trial boot of an update;<br>roll back after 3 unconfirmed boots"]]
+    OB --> G["GSM_time_sync()<br>wait for registration, AT+QLTS, HTTP fallback"]
     G --> OTA[["OTA_Poll() (once per MCU boot)<br>ask ThingsBoard which firmware is assigned;<br>install it and reset into it if different"]]
     OTA --> H["MQTT_app_connect()<br>drop old session, connect, subscribe,<br>publish retained motor_status"]
     D -->|no| I
