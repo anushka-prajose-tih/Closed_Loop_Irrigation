@@ -1,7 +1,7 @@
 # Sambhav V3 Firmware README
 
 ## Overview
-Sambhav is an STM32G0-based environmental and soil monitoring node designed for field deployment. On every RTC alarm the firmware reads a wide set of sensors and stores each measurement as a binary record in external flash memory. At the scheduled post hour it publishes the stored records as JSON over MQTT through an always-on GSM modem. Between cycles it listens on MQTT for motor, command and OTA messages from the backend.
+Sambhav is an STM32G0-based environmental and soil monitoring node designed for field deployment. On every RTC alarm the firmware reads a wide set of sensors and stores each measurement as a binary record in external flash memory. At the scheduled post hour it uploads the stored records as JSON through an always-on GSM modem, either over MQTT or by HTTP POST (a build option). In the MQTT build it also listens between cycles for motor, command and OTA messages from the backend. On every boot it checks ThingsBoard for a firmware update and installs it into the second flash bank.
 
 The system is intended for agriculture and environmental monitoring use cases such as:
 - soil moisture and soil temperature monitoring
@@ -13,7 +13,7 @@ The system is intended for agriculture and environmental monitoring use cases su
 ---
 
 ## Hardware Platform
-- MCU: STM32G0B1RETX
+- MCU: STM32G0B1RETX (512 KB flash as two 256 KB banks: one runs the firmware, the other receives OTA updates)
 - Core peripherals used:
   - ADC1 for analog voltage sensing
   - I2C3 for the CO2 and temperature/humidity sensors
@@ -61,8 +61,9 @@ The system is intended for agriculture and environmental monitoring use cases su
   - publishes the motor state on `motor_status` (QoS 1, retained)
   - subscribes to `motor_cmd`, `cmd` and `ota`; messages addressed to a different `Device_ID` are ignored
 - The MQTT topics and payloads are defined by the external Python backend (`device_simulator.py` / `onem2m_bridge.py`, which bridges to a oneM2M Mobius CSE).
-- There is no motor hardware yet. "Motor" is a software timer started by `motor_cmd` and run for `tti` × `MQTT_TTI_UNIT_SECONDS`; no GPIO is switched. OTA messages are only logged.
-- The upload transport is a build option: `USE_HTTP_UPLOAD` at the top of `Core/Inc/GSM_EC200U.h`. `0` publishes over MQTT; `1` POSTs each record to `SERVER_URL`, and MQTT command handling and the motor timer are then left out of the build. It can also be set per build configuration with `-DUSE_HTTP_UPLOAD=0` or `=1`; any other value stops the build with an error.
+- There is no motor hardware yet. "Motor" is a software timer started by `motor_cmd` and run for `tti` × `MQTT_TTI_UNIT_SECONDS`; no GPIO is switched. Messages on the MQTT `ota` topic are only logged; firmware updates come from ThingsBoard over HTTPS (see [Firmware Updates](#firmware-updates-ota)).
+- The upload transport is a build option: `USE_HTTP_UPLOAD` at the top of `Core/Inc/GSM_EC200U.h`. `0` publishes over MQTT; `1` POSTs each record to `SERVER_URL`, and the MQTT connection, command handling and motor timer are then left out of the build. It can also be set per build configuration with `-DUSE_HTTP_UPLOAD=0` or `=1`; any other value stops the build with an error. Check the header for the current default, as it is switched during testing.
+- An HTTP upload counts as successful when the modem reports no error and the server answers with any 2xx status.
 
 ### 2. Display
 - Display: SSD1306 OLED
@@ -124,9 +125,11 @@ graph LR
     I2C2 --- OLED[SSD1306 OLED]
     SPI2 --- FLASH["W25Q32JV flash<br>70-byte record ring log<br>+ address map"]
     USART3 --- MB["Modbus RTU slaves<br>0x01 NPK1 · 0x07 NPK2<br>0x02 soil 1 · 0x06 soil 2<br>0x04 leaf wetness 1 · 0x08 leaf wetness 2<br>0x03 solar radiation · 0x0A PAR · 0x0B pH<br>0x05 SMKB weather station"]
-    USART4 --- GSM["Quectel EC200U<br>always on"]
-    GSM -.MQTT.- BROKER["MQTT broker<br>MQTT_HOST:MQTT_PORT"]
+    USART4 --- GSM["Quectel EC200U<br>on between cycles,<br>power-cycled at boot"]
+    GSM -.MQTT build.- BROKER["MQTT broker<br>MQTT_HOST:MQTT_PORT"]
     BROKER -.- BACKEND["Python backend<br>onem2m_bridge.py → Mobius CSE"]
+    GSM -.HTTP build.- HTTPSRV["HTTP server<br>SERVER_URL"]
+    GSM -.HTTPS, every boot.- TB["ThingsBoard<br>OTA updates"]
     USART6 --> LOG[USB-serial debug log]
     BAT[Battery voltage] --> ADC
     SOLAR[Solar sensor voltage] --> ADC
@@ -140,24 +143,26 @@ On startup, the firmware:
 - initializes all MCU peripherals
 - initializes the GSM driver and flash interface
 - initializes the OLED and encoder UI
-- runs a boot cycle, which also powers the modem if needed, syncs time and connects to MQTT
+- runs a boot cycle, which power-cycles the modem, checks the state of a recent firmware update, syncs time, checks ThingsBoard for a new update, and (MQTT build) connects to the broker
 
 During each sampling cycle (boot, or RTC alarm), the firmware:
 - reads the stored address map from flash
 - reads environmental, soil, and weather data, once the RTC has a valid time
 - stores the measurement record in flash
 - shows the values on the OLED (boot cycle only)
-- publishes all unsent records over MQTT on boot and at the scheduled post hour
+- uploads all unsent records on boot and at the scheduled post hour
 - sets the next RTC alarm
 
-Between cycles the firmware stays in its main loop. It handles incoming MQTT messages, runs the motor timer, and reconnects if the MQTT link drops. Every day at 03:15 GMT (08:45 IST) it clears the weather station's errors and restarts.
+Between cycles the firmware stays in its main loop. In the MQTT build it handles incoming MQTT messages, runs the motor timer, and reconnects if the MQTT link drops.
+
+Every day at 03:15 GMT (08:45 IST) it clears the weather station's errors and restarts, which also runs the boot-time update check. The restart only happens if a wake-up lands on 03:15, which is the case for a 5 or 15 minute sampling interval but not for 10, 30 or 60 minutes.
 
 ---
 
 ## Firmware Flow Diagrams
 
 ### Main loop (`main()`)
-The MCU does not enter standby: it stays in `while(1)`, and the RTC alarm interrupt only sets `RTC_alarm_flag`. Between cycles the loop keeps servicing MQTT.
+The MCU does not enter standby: it stays in `while(1)`, and the RTC alarm interrupt only sets `RTC_alarm_flag`. Between cycles the loop keeps servicing MQTT (MQTT build only).
 
 ```mermaid
 flowchart TD
@@ -168,7 +173,7 @@ flowchart TD
     L -->|yes| APP[["App_operation()"]]
     APP --> CLR["RTC_alarm_flag = 0"]
     CLR --> P
-    L -->|no| P[["MQTT_app_poll()"]]
+    L -->|no| P[["MQTT_app_poll()<br>(MQTT build only)"]]
     P --> R{"Button long-pressed<br>for more than 3 s?"}
     R -->|no| L
     R -->|yes| MENU["Blocking menu mode<br>ROT_ENC_handler / printHandler"]
@@ -178,6 +183,8 @@ flowchart TD
 ```
 
 ### Per-cycle sequence (`App_operation()`)
+Until the time syncs, the boot branch reruns on every pass of the main loop. The modem power-cycle, `OTA_BootCheck()` and `OTA_Poll()` are guarded so they run only once per MCU boot.
+
 ```mermaid
 flowchart TD
     A["Power RS485 bus"] --> B{"Flash device ID = 0x16?"}
@@ -195,10 +202,10 @@ flowchart TD
     F --> OB[["OTA_BootCheck()<br>count trial boot of an update;<br>roll back after 3 unconfirmed boots"]]
     OB --> G["GSM_time_sync()<br>wait for registration, AT+QLTS, HTTP fallback"]
     G --> OTA[["OTA_Poll() (once per MCU boot)<br>ask ThingsBoard which firmware is assigned;<br>install it and reset into it if different"]]
-    OTA --> H["MQTT_app_connect()<br>drop old session, connect, subscribe,<br>publish retained motor_status"]
+    OTA --> H["MQTT_app_connect() (MQTT build only)<br>drop old session, connect, subscribe,<br>publish retained motor_status"]
     D -->|no| I
     H --> I["Read RTC time (GMT)"]
-    I --> J{"03:15 GMT and<br>not a boot cycle?"}
+    I --> J{"Wake at exactly 03:15 GMT<br>and not a boot cycle?"}
     J -->|yes| K["Write 0x0000 to weather station<br>register 0x00F2 (clear errors)"]
     K --> RST([HAL_NVIC_SystemReset])
     J -->|no| M{"RTC year ≥ 2024?<br>(time synced)"}
@@ -231,21 +238,23 @@ flowchart TD
 ```
 
 ### Data upload (`GSM_post_sequence()`)
+The HTTP build skips the MQTT link check and the "MQTT connected" condition, and POSTs each record instead of publishing it.
+
 ```mermaid
 flowchart TD
     A["Shift time to IST (+19800 s)<br>compute next post hour from GSM_interval"] --> B{"Boot cycle, or alarm at<br>the post hour, minute 00?"}
     B -->|neither| END([return])
     B -->|boot| C["bootup_flag = 0"]
-    B -->|scheduled| D{"MQTT link up?"}
+    B -->|scheduled| D{"MQTT link up?<br>(MQTT build only)"}
     D -->|no| E["MQTT_app_connect()"]
     D -->|yes| F
     E --> F{"IST hour = 0?"}
     F -->|yes| G["GSM_time_sync()"]
     F -->|no| H
     G --> H
-    C --> H{"Flash ready, MQTT connected,<br>read address < write address?"}
+    C --> H{"Flash ready, MQTT connected (MQTT build),<br>read address < write address?"}
     H -->|yes| I["read_flash_create_json()<br>decode + scale one record"]
-    I --> J{"Publish on 'data' topic, QoS 1"}
+    I --> J{"MQTT build: publish on 'data', QoS 1<br>HTTP build: POST to SERVER_URL, expect 2xx"}
     J -->|ok| K["read address += 70, page skip, wrap;<br>save address map; reset fail count"]
     K --> H
     J -->|failed| L{"5th consecutive failure?"}
@@ -257,7 +266,7 @@ flowchart TD
 ```
 
 ### MQTT commands and motor timer (`MQTT_app_poll()`)
-There is no motor hardware; the motor is a software timer that runs for `tti` × `MQTT_TTI_UNIT_SECONDS`, with `tti` clamped to 0–255.
+MQTT build only. There is no motor hardware; the motor is a software timer that runs for `tti` × `MQTT_TTI_UNIT_SECONDS`, with `tti` clamped to 0–255.
 
 ```mermaid
 flowchart TD
@@ -300,8 +309,8 @@ flowchart TD
   - PAR
   - battery and analog solar ADC values
 - Each record is 70 bytes and starts with `0xAA` and ends with `0xEE`. Values are stored as raw sensor counts; scaling is applied when the record is converted to JSON.
-- At post time, each unsent record is converted into a JSON payload and published on the MQTT `data` topic.
-- The read pointer only advances after a successful publish, so unsent data stays in flash and is retried later. A pass gives up after 5 consecutive failures.
+- At post time, each unsent record is converted into a JSON payload and published on the MQTT `data` topic, or POSTed to `SERVER_URL` in the HTTP build.
+- The read pointer only advances after a successful upload, so unsent data stays in flash and is retried later. A pass gives up after 5 consecutive failures.
 - Changing the record layout makes records already in flash unreadable, so erase the log when deploying a layout change.
 
 ---
@@ -311,24 +320,35 @@ The STM32G0B1RE's 512 KB of flash is two 256 KB banks. The firmware runs from on
 
 ```mermaid
 flowchart TD
-    A[["Every boot (power-on, or the daily 03:15 GMT restart)"]] --> B["Read shared attributes from ThingsBoard:<br>fw_title, fw_version, fw_size, fw_checksum"]
+    A[["Every boot (power-on, the daily 03:15 GMT restart,<br>or the reset after an update)"]] --> PC["Power-cycle the modem"]
+    PC --> BC{"Running a new firmware<br>on trial?"}
+    BC -->|"yes, 4th unconfirmed boot"| R["Swap back to the previous firmware<br>and remember the failed one"]
+    BC -->|"no, or boot 1-3"| N{"Token set and<br>network up?"}
+    N -->|no| Z([Normal operation])
+    N -->|yes| B["Read shared attributes from ThingsBoard:<br>fw_title, fw_version, fw_size, fw_checksum"]
     B --> C{"Firmware assigned?"}
-    C -->|no| Z([Normal operation])
+    C -->|no| CONF["Confirm a firmware on trial"] --> Z
     C -->|yes| S{"SHA-256 of the running firmware<br>= fw_checksum?"}
-    S -->|yes| U["Report fw_state UPDATED"] --> Z
-    S -->|no| D["Download into the modem's file system<br>(fw_state DOWNLOADING, DOWNLOADED)"]
+    S -->|yes| U["Confirm a firmware on trial;<br>report fw_state UPDATED"] --> Z
+    S -->|no| DR4{"Same firmware failed<br>before on this device?"}
+    DR4 -->|yes| Z
+    DR4 -->|no| D["Download into the modem's file system<br>(fw_state DOWNLOADING, DOWNLOADED)"]
     D --> E["Copy into the inactive bank,<br>verify SHA-256 from flash (VERIFIED)"]
-    E --> F["Swap banks, reset into the new firmware (UPDATING)"]
-    F --> G{"New firmware reaches<br>ThingsBoard within 3 boots?"}
-    G -->|yes| H["Report UPDATED"]
-    G -->|no| R["Swap back to the previous firmware,<br>report FAILED"]
+    E --> F["Swap banks, reset into the new firmware<br>(UPDATING); it starts on trial"]
+    F --> A
+    R --> A
 ```
 
+- The update decision compares the SHA-256 of the running firmware with `fw_checksum`, not version strings. Flashing the assigned `.bin` with ST-Link is recognised as up to date.
+- A new firmware is on trial until it reaches ThingsBoard. If it hasn't after 3 boots, the device swaps back, and the previous firmware reports `FAILED`. The failed firmware is remembered in an RTC backup register and is not downloaded again until a different one is assigned. Network and download failures are simply retried on the next boot.
+- The trial state lives in RTC backup registers, which survive resets but not a power loss without a backup battery (VBAT).
+- The modem is power-cycled on every boot so that the new firmware never inherits the old one's network session.
 - The update server is **ThingsBoard** (`eu.thingsboard.cloud`), through its device HTTP API over HTTPS. The server address is in `Core/Inc/ota.h`. The device's access token goes in `Core/Inc/ota_credentials.h`, which is git-ignored; OTA stays disabled without it.
 - To update: in ThingsBoard, create an OTA update package (firmware, checksum algorithm SHA256) from the `.bin` produced by the normal build, then assign it to the device or its device profile. The device installs it at its next boot.
 - The access token is compiled into the firmware, so a `.bin` built for one device should only be assigned to that device.
-- The application is limited to one bank (256 KB) by the linker script.
-- The watchdog (IWDG) must be enabled in the `.ioc` so that an update that hangs is reset and rolled back.
+- The application is limited to one bank (256 KB) by the linker script; it is currently about 134 KB.
+- The watchdog (IWDG) must be enabled in the `.ioc` so that an update that hangs is reset and rolled back. It is not enabled yet.
+- Verified on hardware in both directions (bank 1 → bank 2 → bank 1). Rollback has not been exercised yet.
 
 ---
 
