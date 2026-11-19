@@ -1,0 +1,568 @@
+{
+  "title": "OTA Firmware Management",
+  "name": "OTA Firmware Management",
+  "image": null,
+  "mobileHide": false,
+  "mobileOrder": null,
+  "configuration": {
+    "description": "Upload/delete firmware, start or stop OTA per device or profile, HTTP poll links, and fw_state / completion tracking.",
+    "widgets": {
+      "b8d7c635-a96c-4967-be1a-034e127c3b33": {
+        "id": "b8d7c635-a96c-4967-be1a-034e127c3b33",
+        "typeFullFqn": "system.cards.markdown_card",
+        "type": "latest",
+        "sizeX": 24,
+        "sizeY": 3,
+        "row": 0,
+        "col": 0,
+        "config": {
+          "title": "OTA rollout summary",
+          "showTitle": true,
+          "showTitleIcon": false,
+          "titleStyle": {
+            "fontSize": "16px",
+            "fontWeight": 500
+          },
+          "backgroundColor": "#ffffff",
+          "color": "rgba(0, 0, 0, 0.87)",
+          "padding": "8px",
+          "dropShadow": true,
+          "enableFullscreen": true,
+          "widgetStyle": {},
+          "settings": {
+            "useMarkdownTextFunction": true,
+            "markdownTextFunction": "\nvar c = { total: data ? data.length : 0, updated: 0, failed: 0, progress: 0, canceled: 0, idle: 0 };\nvar prog = ['QUEUED','INITIATED','DOWNLOADING','DOWNLOADED','VERIFIED','UPDATING'];\n(data || []).forEach(function (d) {\n  var s = ((d && d['fw_state']) || '').toString().toUpperCase();\n  if (s === 'UPDATED') c.updated++;\n  else if (s === 'FAILED') c.failed++;\n  else if (s === 'CANCELED') c.canceled++;\n  else if (prog.indexOf(s) >= 0) c.progress++;\n  else c.idle++;\n});\nvar active = c.updated + c.failed + c.progress;\nvar pct = active ? Math.round(100 * c.updated / active) : 0;\nfunction tile(label, val, color) {\n  return '<div class=\"tile\"><div class=\"v\" style=\"color:' + color + '\">' + val + '</div><div class=\"l\">' + label + '</div></div>';\n}\nreturn '<div class=\"ota-sum\">' +\n  tile('Devices', c.total, '#37474f') +\n  tile('In progress', c.progress, '#1565c0') +\n  tile('Updated', c.updated, '#2e7d32') +\n  tile('Failed', c.failed, '#c62828') +\n  tile('Stopped', c.canceled, '#616161') +\n  tile('No OTA / idle', c.idle, '#757575') +\n  '<div class=\"tile wide\"><div class=\"l\">Rollout completion</div>' +\n  '<div class=\"bar\"><div class=\"fill\" style=\"width:' + pct + '%\"></div></div>' +\n  '<div class=\"l\">' + pct + '% of devices in rollout updated</div></div>' +\n  '</div>';\n",
+            "markdownTextPattern": "",
+            "applyDefaultMarkdownStyle": false,
+            "markdownCss": "\n.ota-sum{display:flex;flex-wrap:wrap;gap:12px;height:100%;align-items:stretch;}\n.ota-sum .tile{flex:1 1 110px;background:#f5f7fa;border-radius:8px;padding:10px 14px;display:flex;flex-direction:column;justify-content:center;}\n.ota-sum .tile.wide{flex:2 1 240px;}\n.ota-sum .v{font-size:30px;font-weight:600;line-height:1.1;}\n.ota-sum .l{font-size:13px;color:#607d8b;}\n.ota-sum .bar{height:12px;background:#e0e0e0;border-radius:6px;margin:8px 0;overflow:hidden;}\n.ota-sum .fill{height:100%;background:#2e7d32;}\n"
+          },
+          "datasources": [
+            {
+              "type": "entity",
+              "name": null,
+              "entityAliasId": "f0340967-7ebf-486e-b911-9e5ab4f5428f",
+              "filterId": null,
+              "dataKeys": [
+                {
+                  "name": "fw_state",
+                  "type": "timeseries",
+                  "label": "fw_state",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                }
+              ]
+            }
+          ],
+          "actions": {},
+          "showLegend": false
+        }
+      },
+      "639c56b9-1107-44c3-8900-4cbf0e6e1e0c": {
+        "id": "639c56b9-1107-44c3-8900-4cbf0e6e1e0c",
+        "typeFullFqn": "system.cards.entities_table",
+        "type": "latest",
+        "sizeX": 24,
+        "sizeY": 11,
+        "row": 0,
+        "col": 0,
+        "config": {
+          "title": "Device OTA status",
+          "showTitle": true,
+          "showTitleIcon": false,
+          "titleStyle": {
+            "fontSize": "16px",
+            "fontWeight": 500
+          },
+          "backgroundColor": "#ffffff",
+          "color": "rgba(0, 0, 0, 0.87)",
+          "padding": "8px",
+          "dropShadow": true,
+          "enableFullscreen": true,
+          "widgetStyle": {},
+          "settings": {
+            "enableSearch": true,
+            "enableSelectColumnDisplay": true,
+            "enableStickyHeader": true,
+            "enableStickyAction": true,
+            "displayEntityName": true,
+            "entityNameColumnTitle": "Device",
+            "displayEntityLabel": false,
+            "displayEntityType": false,
+            "displayPagination": true,
+            "defaultPageSize": 20,
+            "defaultSortOrder": "entityName",
+            "useRowStyleFunction": false
+          },
+          "datasources": [
+            {
+              "type": "entity",
+              "name": null,
+              "entityAliasId": "f0340967-7ebf-486e-b911-9e5ab4f5428f",
+              "filterId": null,
+              "dataKeys": [
+                {
+                  "name": "current_fw_title",
+                  "type": "timeseries",
+                  "label": "Running FW",
+                  "color": "#4caf50",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "current_fw_version",
+                  "type": "timeseries",
+                  "label": "Running version",
+                  "color": "#8bc34a",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_title",
+                  "type": "attribute",
+                  "label": "Target FW",
+                  "color": "#ff9800",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_version",
+                  "type": "attribute",
+                  "label": "Target version",
+                  "color": "#ffc107",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_state",
+                  "type": "timeseries",
+                  "label": "OTA state",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": true,
+                    "useCellContentFunction": false,
+                    "cellStyleFunction": "\nvar s = (value || '').toString().toUpperCase();\nvar c = { UPDATED:'#2e7d32', FAILED:'#c62828', QUEUED:'#6d4c41', INITIATED:'#5e35b1',\n          DOWNLOADING:'#1565c0', DOWNLOADED:'#00838f', VERIFIED:'#00695c', UPDATING:'#ef6c00', CANCELED:'#616161' }[s];\nreturn c ? { color: '#fff', background: c, fontWeight: 600, borderRadius: '4px', textAlign: 'center' } : {};\n"
+                  }
+                },
+                {
+                  "name": "fw_error",
+                  "type": "timeseries",
+                  "label": "Error",
+                  "color": "#f44336",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                }
+              ]
+            }
+          ],
+          "actions": {
+            "headerButton": [
+              {
+                "name": "Upload firmware",
+                "icon": "cloud_upload",
+                "type": "customPretty",
+                "id": "5ba5625b-23a0-42de-b56e-e6fa4c0f82e9",
+                "openInSeparateDialog": false,
+                "openInPopover": false,
+                "customHtml": "\n<form [formGroup]=\"form\" (ngSubmit)=\"save()\" style=\"width:520px;max-width:100%;\">\n  <mat-toolbar color=\"primary\" style=\"display:flex;justify-content:space-between;\">\n    <h2 style=\"margin:0;font-size:18px;\">Upload new firmware</h2>\n    <button mat-icon-button (click)=\"cancel()\" type=\"button\"><mat-icon>close</mat-icon></button>\n  </mat-toolbar>\n  <mat-progress-bar color=\"warn\" mode=\"indeterminate\" *ngIf=\"busy\"></mat-progress-bar>\n  <div mat-dialog-content style=\"display:flex;flex-direction:column;gap:4px;padding-top:16px;\">\n    <mat-form-field appearance=\"fill\">\n      <mat-label>Device profile</mat-label>\n      <mat-select formControlName=\"deviceProfileId\" required>\n        <mat-option *ngFor=\"let p of profiles\" [value]=\"p.id.id\">{{ p.name }}</mat-option>\n      </mat-select>\n    </mat-form-field>\n    <mat-form-field appearance=\"fill\">\n      <mat-label>Firmware title (e.g. sambhav-fw)</mat-label>\n      <input matInput formControlName=\"title\" required>\n    </mat-form-field>\n    <mat-form-field appearance=\"fill\">\n      <mat-label>Version (e.g. 1.2.0)</mat-label>\n      <input matInput formControlName=\"version\" required>\n    </mat-form-field>\n    <mat-form-field appearance=\"fill\">\n      <mat-label>Release notes (optional)</mat-label>\n      <textarea matInput formControlName=\"description\" rows=\"2\"></textarea>\n    </mat-form-field>\n    <div style=\"margin:4px 0 12px;\">\n      <div style=\"font-size:13px;opacity:.7;margin-bottom:6px;\">Firmware binary (.bin / .hex)</div>\n      <input type=\"file\" (change)=\"onFile($event)\">\n      <div *ngIf=\"file\" style=\"font-size:12px;margin-top:4px;\">{{ file.name }} ({{ (file.size/1024) | number:'1.0-1' }} KB)</div>\n    </div>\n    <mat-checkbox formControlName=\"assignToProfile\">\n      Assign to the whole device profile now (starts OTA on every device of this profile that has no device-level override)\n    </mat-checkbox>\n    <div *ngIf=\"status\" style=\"margin-top:12px;font-size:13px;\" [style.color]=\"status.startsWith('Error') ? '#d32f2f' : 'inherit'\">{{ status }}</div>\n  </div>\n  <div mat-dialog-actions style=\"display:flex;justify-content:flex-end;gap:8px;\">\n    <button mat-button type=\"button\" (click)=\"cancel()\" [disabled]=\"busy\">Cancel</button>\n    <button mat-raised-button color=\"primary\" type=\"submit\" [disabled]=\"busy || form.invalid || !file\">Upload</button>\n  </div>\n</form>\n",
+                "customCss": "",
+                "customFunction": "\nlet $injector = widgetContext.$scope.$injector;\nlet customDialog = $injector.get(widgetContext.servicesMap.get('customDialog'));\nconst http = widgetContext.http;\nconst toP = o => new Promise((res, rej) => o.subscribe({ next: res, error: rej }));\nconst errMsg = e => (e && e.error && e.error.message) || (e && e.message) || (e && e.statusText) || 'Unknown error';\n\n// Base URL devices use to reach the ThingsBoard HTTP transport.\n// Default = same host/port as this UI. Change if devices use a different host, port or a public domain.\nconst HTTP_BASE = window.location.origin;\nconst ACTIVE = ['QUEUED','INITIATED','DOWNLOADING','DOWNLOADED','VERIFIED','UPDATING'];\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\n\nasync function getToken(deviceId) {\n  const c = await toP(http.get('/api/device/' + deviceId + '/credentials'));\n  return c && c.credentialsType === 'ACCESS_TOKEN' ? c.credentialsId : null;\n}\nfunction fwDownloadUrl(token, pkg) {\n  return HTTP_BASE + '/api/v1/' + token + '/firmware?title=' + encodeURIComponent(pkg.title) +\n         '&version=' + encodeURIComponent(pkg.version);\n}\nfunction pollUrl(token) {\n  return HTTP_BASE + '/api/v1/' + token +\n    '/attributes?sharedKeys=fw_title,fw_version,fw_size,fw_checksum,fw_checksum_algorithm,fw_url';\n}\nasync function setFwUrl(deviceId, pkg) {\n  const t = await getToken(deviceId);\n  if (!t) { return; }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/attributes/SHARED_SCOPE',\n                      { fw_url: fwDownloadUrl(t, pkg) }));\n}\nasync function clearFwUrl(deviceId) {\n  try { await toP(http.delete('/api/plugins/telemetry/DEVICE/' + deviceId + '/SHARED_SCOPE?keys=fw_url')); } catch (e) {}\n}\nasync function markCanceled(deviceId, onlyIfActive) {\n  if (onlyIfActive) {\n    const r = await toP(http.get('/api/plugins/telemetry/DEVICE/' + deviceId + '/values/timeseries?keys=fw_state'));\n    const s = (r && r.fw_state && r.fw_state[0]) ? String(r.fw_state[0].value).toUpperCase() : '';\n    if (ACTIVE.indexOf(s) < 0) { return false; }\n  }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/timeseries/ANY',\n                      { fw_state: 'CANCELED', fw_error: 'Stopped by operator' }));\n  return true;\n}\nasync function devicesOfProfile(profileId) {\n  let out = [], page = 0, more = true;\n  while (more) {\n    const r = await toP(http.get('/api/tenant/deviceInfos?pageSize=500&page=' + page + '&deviceProfileId=' + profileId));\n    out = out.concat(r.data || []); more = !!r.hasNext; page++;\n  }\n  return out;\n}\n// Devices without a device-level firmware override follow the profile firmware\nasync function setProfileFwUrls(profileId, pkg) {\n  const devs = (await devicesOfProfile(profileId)).filter(d => !d.firmwareId);\n  for (const d of devs) { await setFwUrl(d.id.id, pkg); }\n  return devs.length;\n}\nasync function stopProfileRollout(profile) {\n  profile.firmwareId = null;\n  await toP(http.post('/api/deviceProfile', profile));\n  const devs = (await devicesOfProfile(profile.id.id)).filter(d => !d.firmwareId);\n  let canceled = 0;\n  for (const d of devs) {\n    await clearFwUrl(d.id.id);\n    if (await markCanceled(d.id.id, true)) { canceled++; }\n  }\n  return { devices: devs.length, canceled: canceled };\n}\n\ncustomDialog.customDialog(htmlTemplate, UploadController).subscribe();\n\nfunction UploadController(instance) {\n  let vm = instance;\n  vm.profiles = [];\n  vm.file = null;\n  vm.busy = false;\n  vm.status = '';\n  vm.form = vm.fb.group({\n    deviceProfileId: [null, [vm.validators.required]],\n    title: ['', [vm.validators.required]],\n    version: ['', [vm.validators.required]],\n    description: [''],\n    assignToProfile: [false]\n  });\n\n  toP(http.get('/api/deviceProfileInfos?pageSize=200&page=0&sortProperty=name&sortOrder=ASC'))\n    .then(r => { vm.profiles = r.data || []; })\n    .catch(e => { vm.status = 'Error loading device profiles: ' + errMsg(e); });\n\n  vm.onFile = function (e) { vm.file = (e.target.files && e.target.files[0]) || null; };\n  vm.cancel = function () { vm.dialogRef.close(null); };\n\n  vm.save = async function () {\n    if (vm.form.invalid || !vm.file || vm.busy) { return; }\n    vm.busy = true;\n    const v = vm.form.value;\n    try {\n      vm.status = 'Creating OTA package...';\n      const pkg = await toP(http.post('/api/otaPackage', {\n        title: v.title.trim(),\n        version: v.version.trim(),\n        type: 'FIRMWARE',\n        usesUrl: false,\n        deviceProfileId: { entityType: 'DEVICE_PROFILE', id: v.deviceProfileId },\n        additionalInfo: { description: v.description || '' }\n      }));\n\n      vm.status = 'Uploading binary (' + vm.file.name + ')...';\n      const fd = new FormData();\n      fd.append('file', vm.file);\n      await toP(http.post('/api/otaPackage/' + pkg.id.id + '?checksumAlgorithm=SHA256', fd));\n\n      if (v.assignToProfile) {\n        vm.status = 'Assigning firmware to device profile...';\n        const prof = await toP(http.get('/api/deviceProfile/' + v.deviceProfileId));\n        prof.firmwareId = { entityType: 'OTA_PACKAGE', id: pkg.id.id };\n        await toP(http.post('/api/deviceProfile', prof));\n        vm.status = 'Publishing HTTP download links (fw_url) to devices...';\n        await setProfileFwUrls(v.deviceProfileId, pkg);\n      }\n\n      vm.status = 'Done.';\n      widgetContext.updateAliases();\n      vm.dialogRef.close(null);\n    } catch (e) {\n      vm.busy = false;\n      vm.status = 'Error: ' + errMsg(e);\n    }\n  };\n}\n",
+                "customResources": []
+              },
+              {
+                "name": "Manage / delete firmware",
+                "icon": "folder_delete",
+                "type": "customPretty",
+                "id": "a48c6b95-ad83-4fdc-ac41-47f5f649363a",
+                "openInSeparateDialog": false,
+                "openInPopover": false,
+                "customHtml": "\n<div style=\"width:900px;max-width:100%;\">\n\n  <mat-toolbar color=\"primary\" style=\"display:flex;justify-content:space-between;\">\n    <h2 style=\"margin:0;font-size:18px;\">Uploaded firmware packages</h2>\n    <button mat-icon-button (click)=\"cancel()\" type=\"button\"><mat-icon>close</mat-icon></button>\n  </mat-toolbar>\n  <mat-progress-bar color=\"warn\" mode=\"indeterminate\" *ngIf=\"busy\"></mat-progress-bar>\n\n  <div mat-dialog-content style=\"padding-top:12px;\">\n    <div *ngIf=\"!busy && !rows.length\" style=\"opacity:.7;\">No firmware packages uploaded.</div>\n    <table *ngIf=\"rows.length\" style=\"width:100%;border-collapse:collapse;font-size:13px;\">\n      <tr style=\"text-align:left;border-bottom:1px solid #ddd;\">\n        <th style=\"padding:6px;\">Title</th><th>Version</th><th>Device profile</th><th>Size</th><th>Uploaded</th><th>Status</th><th></th>\n      </tr>\n      <tr *ngFor=\"let r of rows\" style=\"border-bottom:1px solid #eee;\">\n        <td style=\"padding:6px;\">{{ r.pkg.title }}</td>\n        <td>{{ r.pkg.version }}</td>\n        <td>{{ r.profileName }}</td>\n        <td>{{ r.pkg.dataSize ? ((r.pkg.dataSize/1024) | number:'1.0-1') + ' KB' : '-' }}</td>\n        <td>{{ r.pkg.createdTime | date:'yyyy-MM-dd HH:mm' }}</td>\n        <td><span *ngIf=\"r.active\" style=\"color:#fff;background:#ef6c00;padding:2px 6px;border-radius:4px;\">Rolling out</span></td>\n        <td style=\"white-space:nowrap;text-align:right;\">\n          <button mat-stroked-button type=\"button\" *ngIf=\"r.active\" (click)=\"stopRollout(r)\" [disabled]=\"busy\">Stop rollout</button>\n          <button mat-icon-button type=\"button\" color=\"warn\" (click)=\"remove(r)\" [disabled]=\"busy\" matTooltip=\"Delete package\">\n            <mat-icon>delete</mat-icon>\n          </button>\n        </td>\n      </tr>\n    </table>\n<div *ngIf=\"status\" style=\"margin-top:10px;font-size:13px;white-space:pre-line;\" [style.color]=\"status.startsWith('Error') ? '#d32f2f' : 'inherit'\">{{ status }}</div>\n  </div>\n  <div mat-dialog-actions style=\"display:flex;justify-content:flex-end;\">\n    <button mat-button type=\"button\" (click)=\"cancel()\">Close</button>\n  </div>\n</div>\n",
+                "customCss": "",
+                "customFunction": "\nlet $injector = widgetContext.$scope.$injector;\nlet customDialog = $injector.get(widgetContext.servicesMap.get('customDialog'));\nconst http = widgetContext.http;\nconst toP = o => new Promise((res, rej) => o.subscribe({ next: res, error: rej }));\nconst errMsg = e => (e && e.error && e.error.message) || (e && e.message) || (e && e.statusText) || 'Unknown error';\n\n// Base URL devices use to reach the ThingsBoard HTTP transport.\n// Default = same host/port as this UI. Change if devices use a different host, port or a public domain.\nconst HTTP_BASE = window.location.origin;\nconst ACTIVE = ['QUEUED','INITIATED','DOWNLOADING','DOWNLOADED','VERIFIED','UPDATING'];\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\n\nasync function getToken(deviceId) {\n  const c = await toP(http.get('/api/device/' + deviceId + '/credentials'));\n  return c && c.credentialsType === 'ACCESS_TOKEN' ? c.credentialsId : null;\n}\nfunction fwDownloadUrl(token, pkg) {\n  return HTTP_BASE + '/api/v1/' + token + '/firmware?title=' + encodeURIComponent(pkg.title) +\n         '&version=' + encodeURIComponent(pkg.version);\n}\nfunction pollUrl(token) {\n  return HTTP_BASE + '/api/v1/' + token +\n    '/attributes?sharedKeys=fw_title,fw_version,fw_size,fw_checksum,fw_checksum_algorithm,fw_url';\n}\nasync function setFwUrl(deviceId, pkg) {\n  const t = await getToken(deviceId);\n  if (!t) { return; }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/attributes/SHARED_SCOPE',\n                      { fw_url: fwDownloadUrl(t, pkg) }));\n}\nasync function clearFwUrl(deviceId) {\n  try { await toP(http.delete('/api/plugins/telemetry/DEVICE/' + deviceId + '/SHARED_SCOPE?keys=fw_url')); } catch (e) {}\n}\nasync function markCanceled(deviceId, onlyIfActive) {\n  if (onlyIfActive) {\n    const r = await toP(http.get('/api/plugins/telemetry/DEVICE/' + deviceId + '/values/timeseries?keys=fw_state'));\n    const s = (r && r.fw_state && r.fw_state[0]) ? String(r.fw_state[0].value).toUpperCase() : '';\n    if (ACTIVE.indexOf(s) < 0) { return false; }\n  }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/timeseries/ANY',\n                      { fw_state: 'CANCELED', fw_error: 'Stopped by operator' }));\n  return true;\n}\nasync function devicesOfProfile(profileId) {\n  let out = [], page = 0, more = true;\n  while (more) {\n    const r = await toP(http.get('/api/tenant/deviceInfos?pageSize=500&page=' + page + '&deviceProfileId=' + profileId));\n    out = out.concat(r.data || []); more = !!r.hasNext; page++;\n  }\n  return out;\n}\n// Devices without a device-level firmware override follow the profile firmware\nasync function setProfileFwUrls(profileId, pkg) {\n  const devs = (await devicesOfProfile(profileId)).filter(d => !d.firmwareId);\n  for (const d of devs) { await setFwUrl(d.id.id, pkg); }\n  return devs.length;\n}\nasync function stopProfileRollout(profile) {\n  profile.firmwareId = null;\n  await toP(http.post('/api/deviceProfile', profile));\n  const devs = (await devicesOfProfile(profile.id.id)).filter(d => !d.firmwareId);\n  let canceled = 0;\n  for (const d of devs) {\n    await clearFwUrl(d.id.id);\n    if (await markCanceled(d.id.id, true)) { canceled++; }\n  }\n  return { devices: devs.length, canceled: canceled };\n}\n\ncustomDialog.customDialog(htmlTemplate, ManageController).subscribe();\n\nfunction ManageController(instance) {\n  let vm = instance;\n  vm.rows = []; vm.busy = true; vm.status = '';\n  vm.cancel = function () { widgetContext.updateAliases(); vm.dialogRef.close(null); };\n\n  vm.load = async function () {\n    vm.busy = true;\n    try {\n      const pk = await toP(http.get('/api/otaPackages?pageSize=500&page=0&sortProperty=createdTime&sortOrder=DESC'));\n      const pr = await toP(http.get('/api/deviceProfiles?pageSize=500&page=0'));\n      vm.profiles = {};\n      (pr.data || []).forEach(p => vm.profiles[p.id.id] = p);\n      vm.rows = (pk.data || []).filter(p => p.type === 'FIRMWARE').map(p => {\n        const prof = p.deviceProfileId ? vm.profiles[p.deviceProfileId.id] : null;\n        return { pkg: p, profile: prof, profileName: prof ? prof.name : '-',\n                 active: !!(prof && prof.firmwareId && prof.firmwareId.id === p.id.id) };\n      });\n    } catch (e) { vm.status = 'Error: ' + errMsg(e); }\n    vm.busy = false;\n  };\n\n  vm.stopRollout = async function (r) {\n    if (!confirm('Stop rollout of ' + r.pkg.title + ' v' + r.pkg.version + ' for profile \"' + r.profileName + '\"?')) { return; }\n    vm.busy = true;\n    try {\n      const res = await stopProfileRollout(r.profile);\n      vm.status = 'Rollout stopped: ' + res.devices + ' device(s) unassigned, ' + res.canceled + ' in-progress update(s) marked CANCELED.';\n    } catch (e) { vm.status = 'Error: ' + errMsg(e); }\n    await vm.load();\n  };\n\n  vm.remove = async function (r) {\n    const label = r.pkg.title + ' v' + r.pkg.version;\n    const msg = r.active\n      ? label + ' is the active rollout for profile \"' + r.profileName + '\". Stop the rollout and delete it permanently?'\n      : 'Delete ' + label + ' permanently?';\n    if (!confirm(msg)) { return; }\n    vm.busy = true;\n    try {\n      if (r.active) { await stopProfileRollout(r.profile); }\n      await toP(http.delete('/api/otaPackage/' + r.pkg.id.id));\n      vm.status = 'Deleted ' + label + '.';\n    } catch (e) {\n      vm.status = 'Error: ' + errMsg(e) +\n        '\\nIf the package is still assigned to individual devices, use \"Assign / start OTA\" or \"Stop OTA\" on those devices first.';\n    }\n    await vm.load();\n  };\n\n  vm.load();\n}\n",
+                "customResources": []
+              }
+            ],
+            "actionCellButton": [
+              {
+                "name": "Assign / start OTA",
+                "icon": "system_update_alt",
+                "type": "customPretty",
+                "id": "f070518d-d8a3-4959-8543-f69282b704d7",
+                "openInSeparateDialog": false,
+                "openInPopover": false,
+                "customHtml": "\n<form [formGroup]=\"form\" (ngSubmit)=\"save()\" style=\"width:480px;max-width:100%;\">\n  <mat-toolbar color=\"primary\" style=\"display:flex;justify-content:space-between;\">\n    <h2 style=\"margin:0;font-size:18px;\">Assign firmware: {{ deviceName }}</h2>\n    <button mat-icon-button (click)=\"cancel()\" type=\"button\"><mat-icon>close</mat-icon></button>\n  </mat-toolbar>\n  <mat-progress-bar color=\"warn\" mode=\"indeterminate\" *ngIf=\"busy\"></mat-progress-bar>\n  <div mat-dialog-content style=\"display:flex;flex-direction:column;padding-top:16px;\">\n    <div style=\"font-size:13px;margin-bottom:12px;opacity:.8;\">\n      Packages listed belong to this device's profile. Choosing one starts OTA on this device only.\n    </div>\n    <mat-form-field appearance=\"fill\">\n      <mat-label>Firmware package</mat-label>\n      <mat-select formControlName=\"packageId\">\n        <mat-option [value]=\"null\">None (follow device profile firmware)</mat-option>\n        <mat-option *ngFor=\"let p of packages\" [value]=\"p.id.id\">{{ p.title }} v{{ p.version }}</mat-option>\n      </mat-select>\n    </mat-form-field>\n    <div *ngIf=\"status\" style=\"font-size:13px;\" [style.color]=\"status.startsWith('Error') ? '#d32f2f' : 'inherit'\">{{ status }}</div>\n  </div>\n  <div mat-dialog-actions style=\"display:flex;justify-content:flex-end;gap:8px;\">\n    <button mat-button type=\"button\" (click)=\"cancel()\" [disabled]=\"busy\">Cancel</button>\n    <button mat-raised-button color=\"primary\" type=\"submit\" [disabled]=\"busy || !device\">Start update</button>\n  </div>\n</form>\n",
+                "customCss": "",
+                "customFunction": "\nlet $injector = widgetContext.$scope.$injector;\nlet customDialog = $injector.get(widgetContext.servicesMap.get('customDialog'));\nconst http = widgetContext.http;\nconst toP = o => new Promise((res, rej) => o.subscribe({ next: res, error: rej }));\nconst errMsg = e => (e && e.error && e.error.message) || (e && e.message) || (e && e.statusText) || 'Unknown error';\n\n// Base URL devices use to reach the ThingsBoard HTTP transport.\n// Default = same host/port as this UI. Change if devices use a different host, port or a public domain.\nconst HTTP_BASE = window.location.origin;\nconst ACTIVE = ['QUEUED','INITIATED','DOWNLOADING','DOWNLOADED','VERIFIED','UPDATING'];\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\n\nasync function getToken(deviceId) {\n  const c = await toP(http.get('/api/device/' + deviceId + '/credentials'));\n  return c && c.credentialsType === 'ACCESS_TOKEN' ? c.credentialsId : null;\n}\nfunction fwDownloadUrl(token, pkg) {\n  return HTTP_BASE + '/api/v1/' + token + '/firmware?title=' + encodeURIComponent(pkg.title) +\n         '&version=' + encodeURIComponent(pkg.version);\n}\nfunction pollUrl(token) {\n  return HTTP_BASE + '/api/v1/' + token +\n    '/attributes?sharedKeys=fw_title,fw_version,fw_size,fw_checksum,fw_checksum_algorithm,fw_url';\n}\nasync function setFwUrl(deviceId, pkg) {\n  const t = await getToken(deviceId);\n  if (!t) { return; }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/attributes/SHARED_SCOPE',\n                      { fw_url: fwDownloadUrl(t, pkg) }));\n}\nasync function clearFwUrl(deviceId) {\n  try { await toP(http.delete('/api/plugins/telemetry/DEVICE/' + deviceId + '/SHARED_SCOPE?keys=fw_url')); } catch (e) {}\n}\nasync function markCanceled(deviceId, onlyIfActive) {\n  if (onlyIfActive) {\n    const r = await toP(http.get('/api/plugins/telemetry/DEVICE/' + deviceId + '/values/timeseries?keys=fw_state'));\n    const s = (r && r.fw_state && r.fw_state[0]) ? String(r.fw_state[0].value).toUpperCase() : '';\n    if (ACTIVE.indexOf(s) < 0) { return false; }\n  }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/timeseries/ANY',\n                      { fw_state: 'CANCELED', fw_error: 'Stopped by operator' }));\n  return true;\n}\nasync function devicesOfProfile(profileId) {\n  let out = [], page = 0, more = true;\n  while (more) {\n    const r = await toP(http.get('/api/tenant/deviceInfos?pageSize=500&page=' + page + '&deviceProfileId=' + profileId));\n    out = out.concat(r.data || []); more = !!r.hasNext; page++;\n  }\n  return out;\n}\n// Devices without a device-level firmware override follow the profile firmware\nasync function setProfileFwUrls(profileId, pkg) {\n  const devs = (await devicesOfProfile(profileId)).filter(d => !d.firmwareId);\n  for (const d of devs) { await setFwUrl(d.id.id, pkg); }\n  return devs.length;\n}\nasync function stopProfileRollout(profile) {\n  profile.firmwareId = null;\n  await toP(http.post('/api/deviceProfile', profile));\n  const devs = (await devicesOfProfile(profile.id.id)).filter(d => !d.firmwareId);\n  let canceled = 0;\n  for (const d of devs) {\n    await clearFwUrl(d.id.id);\n    if (await markCanceled(d.id.id, true)) { canceled++; }\n  }\n  return { devices: devs.length, canceled: canceled };\n}\n\ncustomDialog.customDialog(htmlTemplate, AssignController).subscribe();\n\nfunction AssignController(instance) {\n  let vm = instance;\n  vm.deviceName = entityName;\n  vm.device = null;\n  vm.packages = [];\n  vm.busy = true;\n  vm.status = 'Loading...';\n  vm.form = vm.fb.group({ packageId: [null] });\n\n  toP(http.get('/api/device/' + entityId.id))\n    .then(dev => {\n      vm.device = dev;\n      vm.form.patchValue({ packageId: dev.firmwareId ? dev.firmwareId.id : null });\n      return toP(http.get('/api/otaPackages/' + dev.deviceProfileId.id + '/FIRMWARE?pageSize=200&page=0&sortProperty=createdTime&sortOrder=DESC'));\n    })\n    .then(r => {\n      vm.packages = (r.data || []).filter(p => p.hasData !== false);\n      vm.busy = false;\n      vm.status = vm.packages.length ? '' : 'No firmware uploaded for this device profile yet.';\n    })\n    .catch(e => { vm.busy = false; vm.status = 'Error: ' + errMsg(e); });\n\n  vm.cancel = function () { vm.dialogRef.close(null); };\n\n  vm.save = async function () {\n    if (!vm.device || vm.busy) { return; }\n    vm.busy = true;\n    vm.status = 'Saving...';\n    try {\n      const id = vm.form.value.packageId;\n      vm.device.firmwareId = id ? { entityType: 'OTA_PACKAGE', id: id } : null;\n      await toP(http.post('/api/device', vm.device));\n      vm.status = 'Updating HTTP download link (fw_url)...';\n      if (id) {\n        await setFwUrl(vm.device.id.id, vm.packages.find(p => p.id.id === id));\n      } else {\n        const prof = await toP(http.get('/api/deviceProfile/' + vm.device.deviceProfileId.id));\n        if (prof.firmwareId) {\n          await setFwUrl(vm.device.id.id, await toP(http.get('/api/otaPackage/info/' + prof.firmwareId.id)));\n        } else {\n          await clearFwUrl(vm.device.id.id);\n        }\n      }\n      widgetContext.updateAliases();\n      vm.dialogRef.close(null);\n    } catch (e) {\n      vm.busy = false;\n      vm.status = 'Error: ' + errMsg(e);\n    }\n  };\n}\n",
+                "customResources": []
+              },
+              {
+                "name": "Stop OTA",
+                "icon": "stop_circle",
+                "type": "customPretty",
+                "id": "d1bb8141-406f-4ed7-828e-9cdb622aa6f9",
+                "openInSeparateDialog": false,
+                "openInPopover": false,
+                "customHtml": "\n<form [formGroup]=\"form\" (ngSubmit)=\"save()\" style=\"width:540px;max-width:100%;\">\n\n  <mat-toolbar color=\"primary\" style=\"display:flex;justify-content:space-between;\">\n    <h2 style=\"margin:0;font-size:18px;\">Stop OTA: {{ deviceName }}</h2>\n    <button mat-icon-button (click)=\"cancel()\" type=\"button\"><mat-icon>close</mat-icon></button>\n  </mat-toolbar>\n  <mat-progress-bar color=\"warn\" mode=\"indeterminate\" *ngIf=\"busy\"></mat-progress-bar>\n\n  <div mat-dialog-content style=\"display:flex;flex-direction:column;gap:8px;padding-top:16px;font-size:14px;\">\n    <div *ngIf=\"loaded\">\n      <div>Current state: <b>{{ state || '-' }}</b></div>\n      <div>Running: <b>{{ running || 'unknown' }}</b></div>\n      <div>Device-level firmware: <b>{{ deviceFwName || 'none' }}</b></div>\n      <div>Profile firmware ({{ profileName }}): <b>{{ profileFwName || 'none' }}</b></div>\n    </div>\n    <mat-radio-group formControlName=\"scope\" style=\"display:flex;flex-direction:column;gap:8px;margin-top:8px;\" *ngIf=\"loaded\">\n      <mat-radio-button value=\"device\" [disabled]=\"!canStopDevice\">\n        Stop for this device only\n      </mat-radio-button>\n      <div *ngIf=\"!canStopDevice\" style=\"font-size:12px;color:#c62828;margin-left:32px;\">\n        The profile has firmware assigned and no uploaded package matches the running version ({{ running || 'unknown' }}),\n        so this device would fall back to the profile rollout. Stop the whole profile rollout, or upload the running version first.\n      </div>\n      <mat-radio-button value=\"profile\" [disabled]=\"!profileFwName\">\n        Stop the entire rollout for profile \"{{ profileName }}\" (all devices without a device-level override)\n      </mat-radio-button>\n    </mat-radio-group>\n    <div style=\"font-size:12px;opacity:.75;\">\n      Stopping removes the target firmware assignment, deletes the fw_url HTTP link, and records fw_state = CANCELED.\n      A device that is already flashing may still finish; the firmware should abort when fw_title/fw_version/fw_url are deleted.\n    </div>\n<div *ngIf=\"status\" style=\"margin-top:10px;font-size:13px;white-space:pre-line;\" [style.color]=\"status.startsWith('Error') ? '#d32f2f' : 'inherit'\">{{ status }}</div>\n  </div>\n  <div mat-dialog-actions style=\"display:flex;justify-content:flex-end;gap:8px;\">\n    <button mat-button type=\"button\" (click)=\"cancel()\" [disabled]=\"busy\">Close</button>\n    <button mat-raised-button color=\"warn\" type=\"submit\" [disabled]=\"busy || !loaded || !form.value.scope\">Stop OTA</button>\n  </div>\n</form>\n",
+                "customCss": "",
+                "customFunction": "\nlet $injector = widgetContext.$scope.$injector;\nlet customDialog = $injector.get(widgetContext.servicesMap.get('customDialog'));\nconst http = widgetContext.http;\nconst toP = o => new Promise((res, rej) => o.subscribe({ next: res, error: rej }));\nconst errMsg = e => (e && e.error && e.error.message) || (e && e.message) || (e && e.statusText) || 'Unknown error';\n\n// Base URL devices use to reach the ThingsBoard HTTP transport.\n// Default = same host/port as this UI. Change if devices use a different host, port or a public domain.\nconst HTTP_BASE = window.location.origin;\nconst ACTIVE = ['QUEUED','INITIATED','DOWNLOADING','DOWNLOADED','VERIFIED','UPDATING'];\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\n\nasync function getToken(deviceId) {\n  const c = await toP(http.get('/api/device/' + deviceId + '/credentials'));\n  return c && c.credentialsType === 'ACCESS_TOKEN' ? c.credentialsId : null;\n}\nfunction fwDownloadUrl(token, pkg) {\n  return HTTP_BASE + '/api/v1/' + token + '/firmware?title=' + encodeURIComponent(pkg.title) +\n         '&version=' + encodeURIComponent(pkg.version);\n}\nfunction pollUrl(token) {\n  return HTTP_BASE + '/api/v1/' + token +\n    '/attributes?sharedKeys=fw_title,fw_version,fw_size,fw_checksum,fw_checksum_algorithm,fw_url';\n}\nasync function setFwUrl(deviceId, pkg) {\n  const t = await getToken(deviceId);\n  if (!t) { return; }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/attributes/SHARED_SCOPE',\n                      { fw_url: fwDownloadUrl(t, pkg) }));\n}\nasync function clearFwUrl(deviceId) {\n  try { await toP(http.delete('/api/plugins/telemetry/DEVICE/' + deviceId + '/SHARED_SCOPE?keys=fw_url')); } catch (e) {}\n}\nasync function markCanceled(deviceId, onlyIfActive) {\n  if (onlyIfActive) {\n    const r = await toP(http.get('/api/plugins/telemetry/DEVICE/' + deviceId + '/values/timeseries?keys=fw_state'));\n    const s = (r && r.fw_state && r.fw_state[0]) ? String(r.fw_state[0].value).toUpperCase() : '';\n    if (ACTIVE.indexOf(s) < 0) { return false; }\n  }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/timeseries/ANY',\n                      { fw_state: 'CANCELED', fw_error: 'Stopped by operator' }));\n  return true;\n}\nasync function devicesOfProfile(profileId) {\n  let out = [], page = 0, more = true;\n  while (more) {\n    const r = await toP(http.get('/api/tenant/deviceInfos?pageSize=500&page=' + page + '&deviceProfileId=' + profileId));\n    out = out.concat(r.data || []); more = !!r.hasNext; page++;\n  }\n  return out;\n}\n// Devices without a device-level firmware override follow the profile firmware\nasync function setProfileFwUrls(profileId, pkg) {\n  const devs = (await devicesOfProfile(profileId)).filter(d => !d.firmwareId);\n  for (const d of devs) { await setFwUrl(d.id.id, pkg); }\n  return devs.length;\n}\nasync function stopProfileRollout(profile) {\n  profile.firmwareId = null;\n  await toP(http.post('/api/deviceProfile', profile));\n  const devs = (await devicesOfProfile(profile.id.id)).filter(d => !d.firmwareId);\n  let canceled = 0;\n  for (const d of devs) {\n    await clearFwUrl(d.id.id);\n    if (await markCanceled(d.id.id, true)) { canceled++; }\n  }\n  return { devices: devs.length, canceled: canceled };\n}\n\ncustomDialog.customDialog(htmlTemplate, StopController).subscribe();\n\nfunction StopController(instance) {\n  let vm = instance;\n  vm.deviceName = entityName;\n  vm.busy = true; vm.loaded = false; vm.status = 'Loading...';\n  vm.form = vm.fb.group({ scope: [null] });\n  vm.cancel = function () { vm.dialogRef.close(null); };\n\n  (async function load() {\n    try {\n      vm.device = await toP(http.get('/api/device/' + entityId.id));\n      vm.profile = await toP(http.get('/api/deviceProfile/' + vm.device.deviceProfileId.id));\n      vm.profileName = vm.profile.name;\n      const ts = await toP(http.get('/api/plugins/telemetry/DEVICE/' + entityId.id +\n                 '/values/timeseries?keys=fw_state,current_fw_title,current_fw_version'));\n      const val = k => (ts && ts[k] && ts[k][0]) ? String(ts[k][0].value) : '';\n      vm.state = val('fw_state').toUpperCase();\n      const curT = val('current_fw_title'), curV = val('current_fw_version');\n      vm.running = curT || curV ? (curT + ' ' + curV).trim() : '';\n      const pk = await toP(http.get('/api/otaPackages/' + vm.profile.id.id + '/FIRMWARE?pageSize=500&page=0'));\n      vm.packages = pk.data || [];\n      const name = id => { const p = vm.packages.find(x => x.id.id === id); return p ? p.title + ' v' + p.version : id; };\n      vm.deviceFwName = vm.device.firmwareId ? name(vm.device.firmwareId.id) : '';\n      vm.profileFwName = vm.profile.firmwareId ? name(vm.profile.firmwareId.id) : '';\n      vm.match = vm.packages.find(p => p.title === curT && p.version === curV);\n      vm.canStopDevice = !vm.profile.firmwareId || !!vm.match;\n      vm.form.patchValue({ scope: vm.canStopDevice ? 'device' : (vm.profileFwName ? 'profile' : null) });\n      vm.loaded = true; vm.busy = false; vm.status = '';\n    } catch (e) { vm.busy = false; vm.status = 'Error: ' + errMsg(e); }\n  })();\n\n  vm.save = async function () {\n    if (vm.busy) { return; }\n    vm.busy = true;\n    try {\n      if (vm.form.value.scope === 'device') {\n        vm.status = 'Removing target firmware from device...';\n        // No profile firmware -> clear assignment. Profile firmware present -> pin device to the version it already runs.\n        vm.device.firmwareId = vm.profile.firmwareId ? { entityType: 'OTA_PACKAGE', id: vm.match.id.id } : null;\n        await toP(http.post('/api/device', vm.device));\n        await clearFwUrl(vm.device.id.id);\n        await sleep(3000); // let ThingsBoard finish its own state writes first\n        await markCanceled(vm.device.id.id, false);\n        vm.status = 'OTA stopped for ' + vm.deviceName + '.';\n      } else {\n        if (!confirm('Stop the rollout of ' + vm.profileFwName + ' for ALL devices of profile \"' + vm.profileName + '\"?')) {\n          vm.busy = false; return;\n        }\n        vm.status = 'Stopping profile rollout...';\n        const r = await stopProfileRollout(vm.profile);\n        if (vm.device.firmwareId) {\n          vm.device.firmwareId = null;\n          await toP(http.post('/api/device', vm.device));\n          await clearFwUrl(vm.device.id.id);\n          await markCanceled(vm.device.id.id, false);\n        }\n        vm.status = 'Rollout stopped. ' + r.devices + ' device(s) unassigned, ' + r.canceled + ' in-progress update(s) marked CANCELED.';\n      }\n      widgetContext.updateAliases();\n      vm.busy = false; vm.loaded = false;\n    } catch (e) { vm.busy = false; vm.status = 'Error: ' + errMsg(e); }\n  };\n}\n",
+                "customResources": []
+              },
+              {
+                "name": "HTTP poll link",
+                "icon": "link",
+                "type": "customPretty",
+                "id": "d8dffadb-ff30-4f25-bc08-b86cc9b0e40a",
+                "openInSeparateDialog": false,
+                "openInPopover": false,
+                "customHtml": "\n<div style=\"width:760px;max-width:100%;\">\n\n  <mat-toolbar color=\"primary\" style=\"display:flex;justify-content:space-between;\">\n    <h2 style=\"margin:0;font-size:18px;\">HTTP OTA links: {{ deviceName }}</h2>\n    <button mat-icon-button (click)=\"cancel()\" type=\"button\"><mat-icon>close</mat-icon></button>\n  </mat-toolbar>\n  <mat-progress-bar color=\"warn\" mode=\"indeterminate\" *ngIf=\"busy\"></mat-progress-bar>\n\n  <div mat-dialog-content style=\"padding-top:12px;font-size:13px;\" *ngIf=\"links.length\">\n    <div *ngFor=\"let l of links\" style=\"margin-bottom:14px;\">\n      <div style=\"font-weight:600;\">{{ l.label }}</div>\n      <div style=\"display:flex;align-items:center;gap:6px;\">\n        <code style=\"flex:1;background:#f5f5f5;padding:6px;border-radius:4px;word-break:break-all;\">{{ l.method }} {{ l.url }}</code>\n        <button mat-icon-button type=\"button\" (click)=\"copy(l.url)\" matTooltip=\"Copy\"><mat-icon>content_copy</mat-icon></button>\n      </div>\n      <div style=\"opacity:.75;margin-top:2px;\">{{ l.note }}</div>\n    </div>\n    <div style=\"font-weight:600;\">Poll response when an update is available</div>\n    <pre style=\"background:#f5f5f5;padding:8px;border-radius:4px;white-space:pre-wrap;word-break:break-all;\">{{ example }}</pre>\n    <div style=\"opacity:.75;\">When no update is assigned, the \"shared\" object is empty or missing, so there is no fw_url.</div>\n  </div>\n  <div mat-dialog-content *ngIf=\"!links.length\"><div *ngIf=\"status\" style=\"margin-top:10px;font-size:13px;white-space:pre-line;\" [style.color]=\"status.startsWith('Error') ? '#d32f2f' : 'inherit'\">{{ status }}</div></div>\n  <div mat-dialog-actions style=\"display:flex;justify-content:flex-end;\">\n    <span style=\"flex:1;font-size:12px;\">{{ copied }}</span>\n    <button mat-button type=\"button\" (click)=\"cancel()\">Close</button>\n  </div>\n</div>\n",
+                "customCss": "",
+                "customFunction": "\nlet $injector = widgetContext.$scope.$injector;\nlet customDialog = $injector.get(widgetContext.servicesMap.get('customDialog'));\nconst http = widgetContext.http;\nconst toP = o => new Promise((res, rej) => o.subscribe({ next: res, error: rej }));\nconst errMsg = e => (e && e.error && e.error.message) || (e && e.message) || (e && e.statusText) || 'Unknown error';\n\n// Base URL devices use to reach the ThingsBoard HTTP transport.\n// Default = same host/port as this UI. Change if devices use a different host, port or a public domain.\nconst HTTP_BASE = window.location.origin;\nconst ACTIVE = ['QUEUED','INITIATED','DOWNLOADING','DOWNLOADED','VERIFIED','UPDATING'];\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\n\nasync function getToken(deviceId) {\n  const c = await toP(http.get('/api/device/' + deviceId + '/credentials'));\n  return c && c.credentialsType === 'ACCESS_TOKEN' ? c.credentialsId : null;\n}\nfunction fwDownloadUrl(token, pkg) {\n  return HTTP_BASE + '/api/v1/' + token + '/firmware?title=' + encodeURIComponent(pkg.title) +\n         '&version=' + encodeURIComponent(pkg.version);\n}\nfunction pollUrl(token) {\n  return HTTP_BASE + '/api/v1/' + token +\n    '/attributes?sharedKeys=fw_title,fw_version,fw_size,fw_checksum,fw_checksum_algorithm,fw_url';\n}\nasync function setFwUrl(deviceId, pkg) {\n  const t = await getToken(deviceId);\n  if (!t) { return; }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/attributes/SHARED_SCOPE',\n                      { fw_url: fwDownloadUrl(t, pkg) }));\n}\nasync function clearFwUrl(deviceId) {\n  try { await toP(http.delete('/api/plugins/telemetry/DEVICE/' + deviceId + '/SHARED_SCOPE?keys=fw_url')); } catch (e) {}\n}\nasync function markCanceled(deviceId, onlyIfActive) {\n  if (onlyIfActive) {\n    const r = await toP(http.get('/api/plugins/telemetry/DEVICE/' + deviceId + '/values/timeseries?keys=fw_state'));\n    const s = (r && r.fw_state && r.fw_state[0]) ? String(r.fw_state[0].value).toUpperCase() : '';\n    if (ACTIVE.indexOf(s) < 0) { return false; }\n  }\n  await toP(http.post('/api/plugins/telemetry/DEVICE/' + deviceId + '/timeseries/ANY',\n                      { fw_state: 'CANCELED', fw_error: 'Stopped by operator' }));\n  return true;\n}\nasync function devicesOfProfile(profileId) {\n  let out = [], page = 0, more = true;\n  while (more) {\n    const r = await toP(http.get('/api/tenant/deviceInfos?pageSize=500&page=' + page + '&deviceProfileId=' + profileId));\n    out = out.concat(r.data || []); more = !!r.hasNext; page++;\n  }\n  return out;\n}\n// Devices without a device-level firmware override follow the profile firmware\nasync function setProfileFwUrls(profileId, pkg) {\n  const devs = (await devicesOfProfile(profileId)).filter(d => !d.firmwareId);\n  for (const d of devs) { await setFwUrl(d.id.id, pkg); }\n  return devs.length;\n}\nasync function stopProfileRollout(profile) {\n  profile.firmwareId = null;\n  await toP(http.post('/api/deviceProfile', profile));\n  const devs = (await devicesOfProfile(profile.id.id)).filter(d => !d.firmwareId);\n  let canceled = 0;\n  for (const d of devs) {\n    await clearFwUrl(d.id.id);\n    if (await markCanceled(d.id.id, true)) { canceled++; }\n  }\n  return { devices: devs.length, canceled: canceled };\n}\n\ncustomDialog.customDialog(htmlTemplate, PollController).subscribe();\n\nfunction PollController(instance) {\n  let vm = instance;\n  vm.deviceName = entityName; vm.links = []; vm.busy = true; vm.status = 'Loading...'; vm.copied = '';\n  vm.cancel = function () { vm.dialogRef.close(null); };\n  vm.copy = function (t) {\n    navigator.clipboard.writeText(t).then(() => vm.copied = 'Copied to clipboard', () => vm.copied = 'Copy failed, select the text manually');\n  };\n\n  (async function () {\n    try {\n      const token = await getToken(entityId.id);\n      if (!token) { vm.busy = false; vm.status = 'Error: this device does not use ACCESS_TOKEN credentials, which the HTTP API requires.'; return; }\n      const dev = await toP(http.get('/api/device/' + entityId.id));\n      let fwId = dev.firmwareId;\n      if (!fwId) { const prof = await toP(http.get('/api/deviceProfile/' + dev.deviceProfileId.id)); fwId = prof.firmwareId; }\n      const pkg = fwId ? await toP(http.get('/api/otaPackage/info/' + fwId.id)) : null;\n      const ex = pkg || { title: 'sambhav-fw', version: '1.2.0', dataSize: 245760, checksum: '<sha256>', checksumAlgorithm: 'SHA256' };\n      vm.links = [\n        { label: '1. Poll for updates', method: 'GET', url: pollUrl(token),\n          note: 'Update available if shared.fw_url is present and shared.fw_version differs from the running version.' },\n        { label: '2. Download binary (the fw_url value)', method: 'GET',\n          url: pkg ? fwDownloadUrl(token, pkg) : HTTP_BASE + '/api/v1/' + token + '/firmware?title=<fw_title>&version=<fw_version>',\n          note: 'Append &size=4096&chunk=0,1,2... to fetch in chunks (useful for modem RAM limits). Verify fw_checksum before flashing.' },\n        { label: '3. Report OTA state', method: 'POST', url: HTTP_BASE + '/api/v1/' + token + '/telemetry',\n          note: 'Body e.g. {\"fw_state\":\"DOWNLOADING\"} ... {\"fw_state\":\"UPDATED\"}, or {\"fw_state\":\"FAILED\",\"fw_error\":\"checksum mismatch\"}. After reboot send {\"current_fw_title\":\"...\",\"current_fw_version\":\"...\"}.' },\n        { label: 'Optional: long-poll instead of periodic polling', method: 'GET',\n          url: HTTP_BASE + '/api/v1/' + token + '/attributes/updates?timeout=30000',\n          note: 'The request is held open up to 30 s and returns as soon as shared attributes change (e.g. fw_url set or deleted).' }\n      ];\n      vm.example = JSON.stringify({ shared: {\n        fw_title: ex.title, fw_version: ex.version, fw_size: ex.dataSize,\n        fw_checksum: ex.checksum, fw_checksum_algorithm: ex.checksumAlgorithm,\n        fw_url: fwDownloadUrl(token, ex) } }, null, 2);\n      vm.busy = false; vm.status = '';\n    } catch (e) { vm.busy = false; vm.status = 'Error: ' + errMsg(e); }\n  })();\n}\n",
+                "customResources": []
+              }
+            ],
+            "rowClick": [
+              {
+                "name": "OTA details",
+                "icon": "info",
+                "type": "openDashboardState",
+                "id": "17d03d8a-bb3c-407e-a76f-a050e6a33f39",
+                "openInSeparateDialog": false,
+                "openInPopover": false,
+                "targetDashboardStateId": "device_ota",
+                "setEntityId": true,
+                "stateEntityParamName": null
+              }
+            ]
+          },
+          "showLegend": false
+        }
+      },
+      "b39168c7-5adc-45cb-9c4c-8bbcb3aab1dc": {
+        "id": "b39168c7-5adc-45cb-9c4c-8bbcb3aab1dc",
+        "typeFullFqn": "system.cards.markdown_card",
+        "type": "latest",
+        "sizeX": 24,
+        "sizeY": 4,
+        "row": 0,
+        "col": 0,
+        "config": {
+          "title": "OTA progress",
+          "showTitle": true,
+          "showTitleIcon": false,
+          "titleStyle": {
+            "fontSize": "16px",
+            "fontWeight": 500
+          },
+          "backgroundColor": "#ffffff",
+          "color": "rgba(0, 0, 0, 0.87)",
+          "padding": "8px",
+          "dropShadow": true,
+          "enableFullscreen": true,
+          "widgetStyle": {},
+          "settings": {
+            "useMarkdownTextFunction": true,
+            "markdownTextFunction": "\nvar d = (data && data[0]) || {};\nvar s = (d['fw_state'] || '-').toString().toUpperCase();\nvar steps = ['QUEUED','INITIATED','DOWNLOADING','DOWNLOADED','VERIFIED','UPDATING','UPDATED'];\nvar idx = steps.indexOf(s);\nvar col = s === 'CANCELED' ? '#616161' : s === 'FAILED' ? '#c62828' : (s === 'UPDATED' ? '#2e7d32' : '#1565c0');\nvar track = steps.map(function (st, i) {\n  var done = idx >= 0 && i <= idx;\n  return '<div class=\"st ' + (done ? 'done' : '') + '\">' + st + '</div>';\n}).join('');\nvar done = (s === 'UPDATED' && d['current_fw_version'] && d['current_fw_version'] === d['fw_version']);\nreturn '<div class=\"dv\">' +\n  '<div class=\"row\"><div><span class=\"l\">Running</span><b>' + (d['current_fw_title'] || '-') + ' ' + (d['current_fw_version'] || '') + '</b></div>' +\n  '<div><span class=\"l\">Target</span><b>' + (d['fw_title'] || '-') + ' ' + (d['fw_version'] || '') + '</b></div>' +\n  '<div><span class=\"l\">State</span><b style=\"color:' + col + '\">' + s + '</b></div>' +\n  '<div><span class=\"l\">Completion</span><b style=\"color:' + (done ? '#2e7d32' : '#757575') + '\">' + (done ? 'COMPLETE' : (s === 'FAILED' ? 'FAILED' : (s === 'CANCELED' ? 'STOPPED' : 'PENDING'))) + '</b></div></div>' +\n  '<div class=\"track\">' + track + '</div>' +\n  (d['fw_error'] ? '<div class=\"err\">Error: ' + d['fw_error'] + '</div>' : '') +\n  (d['fw_url'] ? '<div style=\"font-size:12px;word-break:break-all;\"><span class=\"l\">HTTP download (fw_url): </span>' + d['fw_url'] + '</div>' : '') +\n  '</div>';\n",
+            "markdownTextPattern": "",
+            "applyDefaultMarkdownStyle": false,
+            "markdownCss": "\n.dv{display:flex;flex-direction:column;gap:12px;}\n.dv .row{display:flex;flex-wrap:wrap;gap:24px;}\n.dv .row>div{display:flex;flex-direction:column;}\n.dv .l{font-size:12px;color:#607d8b;}\n.dv b{font-size:18px;}\n.dv .track{display:flex;gap:4px;flex-wrap:wrap;}\n.dv .st{flex:1 1 90px;text-align:center;font-size:11px;padding:6px 2px;border-radius:4px;background:#eceff1;color:#78909c;}\n.dv .st.done{background:#1565c0;color:#fff;}\n.dv .err{color:#c62828;font-size:13px;}\n"
+          },
+          "datasources": [
+            {
+              "type": "entity",
+              "name": null,
+              "entityAliasId": "9f5d6b8c-4583-47f5-ab00-d089915122f0",
+              "filterId": null,
+              "dataKeys": [
+                {
+                  "name": "current_fw_title",
+                  "type": "timeseries",
+                  "label": "current_fw_title",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "current_fw_version",
+                  "type": "timeseries",
+                  "label": "current_fw_version",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_title",
+                  "type": "attribute",
+                  "label": "fw_title",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_version",
+                  "type": "attribute",
+                  "label": "fw_version",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_state",
+                  "type": "timeseries",
+                  "label": "fw_state",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_error",
+                  "type": "timeseries",
+                  "label": "fw_error",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "fw_url",
+                  "type": "attribute",
+                  "label": "fw_url",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                }
+              ]
+            }
+          ],
+          "actions": {},
+          "showLegend": false
+        }
+      },
+      "53e20987-afab-46f3-920e-093d61db33ce": {
+        "id": "53e20987-afab-46f3-920e-093d61db33ce",
+        "typeFullFqn": "system.cards.timeseries_table",
+        "type": "timeseries",
+        "sizeX": 24,
+        "sizeY": 10,
+        "row": 0,
+        "col": 0,
+        "config": {
+          "title": "OTA state history",
+          "showTitle": true,
+          "showTitleIcon": false,
+          "titleStyle": {
+            "fontSize": "16px",
+            "fontWeight": 500
+          },
+          "backgroundColor": "#ffffff",
+          "color": "rgba(0, 0, 0, 0.87)",
+          "padding": "8px",
+          "dropShadow": true,
+          "enableFullscreen": true,
+          "widgetStyle": {},
+          "settings": {
+            "showTimestamp": true,
+            "displayPagination": true,
+            "defaultPageSize": 20,
+            "enableSearch": true,
+            "enableSelectColumnDisplay": true,
+            "enableStickyHeader": true,
+            "hideEmptyLines": true,
+            "useEntityLabel": false,
+            "showMilliseconds": false
+          },
+          "datasources": [
+            {
+              "type": "entity",
+              "name": null,
+              "entityAliasId": "9f5d6b8c-4583-47f5-ab00-d089915122f0",
+              "filterId": null,
+              "dataKeys": [
+                {
+                  "name": "fw_state",
+                  "type": "timeseries",
+                  "label": "OTA state",
+                  "color": "#2196f3",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": true,
+                    "useCellContentFunction": false,
+                    "cellStyleFunction": "\nvar s = (value || '').toString().toUpperCase();\nvar c = { UPDATED:'#2e7d32', FAILED:'#c62828', QUEUED:'#6d4c41', INITIATED:'#5e35b1',\n          DOWNLOADING:'#1565c0', DOWNLOADED:'#00838f', VERIFIED:'#00695c', UPDATING:'#ef6c00', CANCELED:'#616161' }[s];\nreturn c ? { color: '#fff', background: c, fontWeight: 600, borderRadius: '4px', textAlign: 'center' } : {};\n"
+                  }
+                },
+                {
+                  "name": "fw_error",
+                  "type": "timeseries",
+                  "label": "Error",
+                  "color": "#f44336",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                },
+                {
+                  "name": "current_fw_version",
+                  "type": "timeseries",
+                  "label": "Running version",
+                  "color": "#4caf50",
+                  "settings": {
+                    "columnWidth": "0px",
+                    "useCellStyleFunction": false,
+                    "useCellContentFunction": false
+                  }
+                }
+              ]
+            }
+          ],
+          "actions": {},
+          "showLegend": false,
+          "useDashboardTimewindow": true
+        }
+      }
+    },
+    "states": {
+      "default": {
+        "name": "OTA Firmware Management",
+        "root": true,
+        "layouts": {
+          "main": {
+            "widgets": {
+              "b8d7c635-a96c-4967-be1a-034e127c3b33": {
+                "sizeX": 24,
+                "sizeY": 3,
+                "row": 0,
+                "col": 0
+              },
+              "639c56b9-1107-44c3-8900-4cbf0e6e1e0c": {
+                "sizeX": 24,
+                "sizeY": 11,
+                "row": 3,
+                "col": 0
+              }
+            },
+            "gridSettings": {
+              "backgroundColor": "#eeeeee",
+              "columns": 24,
+              "margin": 10,
+              "outerMargin": true,
+              "backgroundSizeMode": "100%",
+              "layoutType": "default"
+            }
+          }
+        }
+      },
+      "device_ota": {
+        "name": "${entityName} – OTA",
+        "root": false,
+        "layouts": {
+          "main": {
+            "widgets": {
+              "b39168c7-5adc-45cb-9c4c-8bbcb3aab1dc": {
+                "sizeX": 24,
+                "sizeY": 4,
+                "row": 0,
+                "col": 0
+              },
+              "53e20987-afab-46f3-920e-093d61db33ce": {
+                "sizeX": 24,
+                "sizeY": 10,
+                "row": 4,
+                "col": 0
+              }
+            },
+            "gridSettings": {
+              "backgroundColor": "#eeeeee",
+              "columns": 24,
+              "margin": 10,
+              "outerMargin": true,
+              "backgroundSizeMode": "100%",
+              "layoutType": "default"
+            }
+          }
+        }
+      }
+    },
+    "entityAliases": {
+      "f0340967-7ebf-486e-b911-9e5ab4f5428f": {
+        "id": "f0340967-7ebf-486e-b911-9e5ab4f5428f",
+        "alias": "All devices",
+        "filter": {
+          "type": "entityType",
+          "resolveMultiple": true,
+          "entityType": "DEVICE"
+        }
+      },
+      "9f5d6b8c-4583-47f5-ab00-d089915122f0": {
+        "id": "9f5d6b8c-4583-47f5-ab00-d089915122f0",
+        "alias": "Selected device",
+        "filter": {
+          "type": "stateEntity",
+          "resolveMultiple": false,
+          "stateEntityParamName": null,
+          "defaultStateEntity": null
+        }
+      }
+    },
+    "filters": {},
+    "timewindow": {
+      "selectedTab": 0,
+      "realtime": {
+        "realtimeType": 0,
+        "timewindowMs": 604800000
+      },
+      "aggregation": {
+        "type": "NONE",
+        "limit": 1000
+      }
+    },
+    "settings": {
+      "stateControllerId": "entity",
+      "showTitle": true,
+      "showDashboardsSelect": true,
+      "showEntitiesSelect": true,
+      "showDashboardTimewindow": true,
+      "showDashboardExport": true,
+      "toolbarAlwaysOpen": true
+    }
+  },
+  "resources": []
+}
